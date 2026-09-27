@@ -1,0 +1,180 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <title>TTD Pilgrim Autofill</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link
+      href="https://fonts.googleapis.com/css2?family=Poppins:ital,wght@0,100;0,200;0,300;0,400;0,500;0,600;0,700;0,800;0,900;1,100;1,200;1,300;1,400;1,500;1,600;1,700;1,800;1,900&display=swap"
+      rel="stylesheet">
+    <link rel="stylesheet" href="popup.css" />
+  </head>
+  <body>
+    <header>
+      <div class="header-row">
+        <img src="icons/icon48.png" alt class="header-icon" />
+        <div>
+          <h1>TTD Pilgrim Autofill</h1>
+          <p class="subtitle">Manage your groups, pick pilgrims, autofill.</p>
+        </div>
+        <div class="header-actions">
+          <label class="select-all-control"
+            title="Select or deselect all pilgrims">
+            <input id="selectAllBtn" type="checkbox"
+              aria-label="Select or deselect all pilgrims" />
+          </label>
+          <button id="clearAllBtn" class="delete-all-btn" type="button"
+            title="Delete all group data"
+            aria-label="Delete all group data">&#128465;</button>
+        </div>
+      </div>
+    </header>
+
+    <div id="status" class="status" role="status" aria-live="polite"></div>
+
+    <div class="import-row">
+      <button id="importBtn" class="secondary-btn">Import JSON</button>
+      <button id="exportBtn" class="secondary-btn">Sample JSON</button>
+      <input type="file" id="importFile" accept="application/json" hidden />
+    </div>
+
+    <div id="groups"></div>
+
+    <button id="addGroupBtn" class="add-group-btn" type="button">+ Add
+      Group</button>
+
+    <footer>
+      <div class="checkboxs_payments_container">
+        <div class="checkboxes">
+          <label class="continue-check">
+            <input type="checkbox" id="clickContinueCheckbox" checked />
+            Also click Continue and Pay Now after autofill
+          </label>
+          <label class="continue-check">
+            <input type="checkbox" id="autoRunCheckbox" checked />
+            Auto-run the moment the pilgrim form loads
+          </label>
+        </div>
+        <div class="payment-methods">
+          <div class="payment-method-title">Payment method</div>
+          <div class="payment-options">
+            <label class="payment-option">
+              <input type="radio" name="paymentMethod" value="upi" checked />
+              UPI / Generate QR
+            </label>
+            <label class="payment-option">
+              <input type="radio" name="paymentMethod" value="card" />
+              Credit / Debit card
+            </label>
+          </div>
+        </div>
+      </div>
+
+      <div id="cardDetailsSection" class="payment-card-details" hidden>
+        <details id="cardDetailsDisclosure" class="card-details-disclosure">
+          <summary>Card Details</summary>
+          <div class="card-details-content">
+            <div class="card-json-actions">
+              <button id="importCardBtn" class="card-json-btn"
+                type="button">Import Card JSON</button>
+              <button id="downloadCardSampleBtn" class="card-json-btn"
+                type="button">Card Sample JSON</button>
+              <input type="file" id="importCardFile" accept="application/json"
+                hidden />
+            </div>
+            <div class="payment-card-row">
+              <label>Card Number
+                <input type="text" data-field="cardNumber" maxlength="24" />
+              </label>
+              <label>Name on Card
+                <input type="text" data-field="cardName" maxlength="50" />
+              </label>
+            </div>
+            <div class="payment-card-row">
+              <label>Expiry (MM/YY)
+                <input type="text" data-field="expiry" maxlength="5" />
+              </label>
+              <label>CVV
+                <input type="password" data-field="cvv" maxlength="4" />
+              </label>
+            </div>
+
+          </div>
+        </details>
+      </div>
+      <div id="selectionCount" class="selection-count"></div>
+      <button id="autofillBtn" class="primary-btn">Autofill Selected
+        Pilgrims</button>
+      <div class="hint">Select pilgrims above, then click Autofill or press
+        <span class="shortcut-key">Ctrl+Shift+Y</span> on the TTD page.</div>
+    </footer>
+
+    <template id="group-template">
+      <section class="group">
+        <div class="group-header">
+          <input class="group-name" type="text" />
+          <div class="group-actions">
+            <label class="group-select-control"
+              title="Select or deselect all pilgrims in this group">
+              <input class="group-select-all" type="checkbox"
+                aria-label="Select or deselect all pilgrims in this group" />
+            </label>
+            <button class="delete-group-btn" type="button"
+              title="Delete this group"
+              aria-label="Delete this group">&#128465;</button>
+            <button class="toggle-btn" type="button">
+              <span>General Details</span><span class="details-chevron"
+                aria-hidden="true">▾</span>
+            </button>
+          </div>
+        </div>
+
+        <div class="general-details">
+          <label>Email Address
+            <input type="email" data-field="email" />
+          </label>
+          <label>City
+            <input type="text" data-field="city" />
+          </label>
+          <label>State
+            <input type="text" data-field="state" />
+          </label>
+          <label>Country
+            <input type="text" data-field="country" />
+          </label>
+          <label>Pincode
+            <input type="text" maxlength="6" data-field="pincode" />
+          </label>
+        </div>
+
+        <div class="pilgrims"></div>
+      </section>
+    </template>
+
+    <template id="pilgrim-template">
+      <div class="pilgrim-row">
+        <input type="checkbox" class="pilgrim-check" />
+        <div class="pilgrim-fields">
+          <input type="text" placeholder="Name" data-field="name" />
+          <input type="text" placeholder="Age" maxlength="3" data-field="age"
+            class="age-field" />
+          <select data-field="gender">
+            <option value>Gender</option>
+            <option value="Male">Male</option>
+            <option value="Female">Female</option>
+            <option value="Transgender">Transgender</option>
+          </select>
+          <select data-field="idType">
+            <option value>Photo ID</option>
+            <option value="Aadhaar Card">Aadhaar Card</option>
+            <option value="Passport">Passport</option>
+          </select>
+          <input type="text" placeholder="ID Number" data-field="idNumber" />
+        </div>
+      </div>
+    </template>
+
+    <script src="popup.js"></script>
+  </body>
+</html>
