@@ -5,6 +5,62 @@ const CLICK_CONTINUE_PREF_KEY = "ttdClickContinuePref";
 const PAYMENT_METHOD_PREF_KEY = "ttdPaymentMethodPref";
 const CARD_DETAILS_PREF_KEY = "ttdCardDetailsPref";
 const AUTO_RUN_PREF_KEY = "ttdAutoRunOnLoad";
+const POPUP_WIDTH_STORAGE_KEY = "ttdPopupWidth";
+const POPUP_WIDTH_DEFAULT = 430;
+const POPUP_WIDTH_MIN = 430;
+const POPUP_WIDTH_MAX = 500;
+
+function clampPopupWidth(width) {
+  return Math.min(POPUP_WIDTH_MAX, Math.max(POPUP_WIDTH_MIN, Math.round(width)));
+}
+
+function applyPopupWidth(width) {
+  const w = clampPopupWidth(width);
+  document.documentElement.style.setProperty("--popup-width", `${w}px`);
+  document.documentElement.style.width = `${w}px`;
+  document.body.style.width = `${w}px`;
+  return w;
+}
+
+function initPopupResize(savedWidth) {
+  const handle = document.getElementById("popupResizeHandle");
+  if (!handle) return;
+
+  if (typeof savedWidth === "number" && savedWidth > POPUP_WIDTH_DEFAULT) {
+    applyPopupWidth(savedWidth);
+  }
+
+  handle.addEventListener("mousedown", (event) => {
+    if (event.button !== 0) return;
+    event.preventDefault();
+
+    const startX = event.clientX;
+    const startWidth = document.body.getBoundingClientRect().width;
+    handle.classList.add("is-dragging");
+    document.body.classList.add("is-resizing-popup");
+
+    const onMove = (moveEvent) => {
+      applyPopupWidth(startWidth + (moveEvent.clientX - startX));
+    };
+
+    const onUp = () => {
+      document.removeEventListener("mousemove", onMove);
+      document.removeEventListener("mouseup", onUp);
+      handle.classList.remove("is-dragging");
+      document.body.classList.remove("is-resizing-popup");
+      const finalWidth = applyPopupWidth(document.body.getBoundingClientRect().width);
+      if (finalWidth > POPUP_WIDTH_DEFAULT) {
+        chrome.storage.local.set({ [POPUP_WIDTH_STORAGE_KEY]: finalWidth });
+      } else {
+        chrome.storage.local.remove(POPUP_WIDTH_STORAGE_KEY);
+        applyPopupWidth(POPUP_WIDTH_DEFAULT);
+      }
+    };
+
+    document.addEventListener("mousemove", onMove);
+    document.addEventListener("mouseup", onUp);
+  });
+}
 
 function createEmptyGroup(index) {
   return {
@@ -528,6 +584,14 @@ async function handleExport() {
 }
 
 (async function init() {
+  const storedPopupWidth = await new Promise((resolve) => {
+    chrome.storage.local.get([POPUP_WIDTH_STORAGE_KEY], (res) => {
+      const value = res[POPUP_WIDTH_STORAGE_KEY];
+      resolve(typeof value === "number" ? value : null);
+    });
+  });
+  initPopupResize(storedPopupWidth);
+
   const groups = await loadData();
   render(groups);
 

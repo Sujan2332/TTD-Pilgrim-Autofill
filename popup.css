@@ -1,11 +1,22 @@
+:root {
+  --popup-width: 430px;
+}
+
 * {
   box-sizing: border-box;
   font-family: "Poppins", sans-serif;
   color: black;
 }
 
+html {
+  width: var(--popup-width);
+  min-width: 430px;
+}
+
 body {
-  width: 430px;
+  position: relative;
+  width: var(--popup-width);
+  min-width: 430px;
   max-height: 760px;
   overflow-y: auto;
   font-family: "Poppins", sans-serif;
@@ -138,7 +149,7 @@ header h1 {
 }
 
 .status:not(:empty) {
-  max-width: 390px;
+  max-width: calc(var(--popup-width) - 40px);
   padding: 7px 10px;
   border: 1px solid #bbf7d0;
   border-radius: 7px;
@@ -624,4 +635,26 @@ footer {
 
 .primary-btn {
   color: #fff !important;
+}
+
+.popup-resize-handle {
+  position: fixed;
+  top: 0;
+  right: 0;
+  width: 10px;
+  height: 100%;
+  cursor: ew-resize;
+  z-index: 20;
+  touch-action: none;
+  background: linear-gradient(to left, rgba(234, 88, 12, 0.08), transparent 70%);
+}
+
+.popup-resize-handle:hover,
+.popup-resize-handle.is-dragging {
+  background: linear-gradient(to left, rgba(234, 88, 12, 0.22), transparent 70%);
+}
+
+body.is-resizing-popup {
+  user-select: none;
+  cursor: ew-resize;
 }
