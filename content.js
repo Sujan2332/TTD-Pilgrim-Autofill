@@ -27,10 +27,51 @@ const CONTENT_SCRIPT_INSTANCE = { id: `${Date.now()}-${Math.random()}` };
 window[CONTENT_SCRIPT_INSTANCE_KEY] = CONTENT_SCRIPT_INSTANCE;
 
 const ADD_PILGRIM_TEXT_PATTERN = /add.*pilgrim/i;
-const SLOT_ADD_WAIT_MS = 300;
+
+// Ensure MAIN-world bridge listener is active to execute trusted React onClick handlers
+function ensurePageBridge() {
+  if (document.getElementById("__ttd_page_bridge_tag")) return;
+  const script = document.createElement("script");
+  script.id = "__ttd_page_bridge_tag";
+  script.textContent = `
+    (function() {
+      if (window.__TTD_BRIDGE_LOADED__) return;
+      window.__TTD_BRIDGE_LOADED__ = true;
+      function triggerReactClick(el) {
+        if (!el) return false;
+        var key = Object.keys(el).find(function(k) { return k.startsWith("__reactProps"); });
+        if (key && el[key] && typeof el[key].onClick === "function") {
+          try {
+            el[key].onClick({
+              isTrusted: true,
+              nativeEvent: { isTrusted: true },
+              preventDefault: function() {},
+              stopPropagation: function() {},
+              target: el,
+              currentTarget: el,
+            });
+            return true;
+          } catch (err) {
+            console.warn("[TTD Bridge] React onClick error:", err);
+          }
+        }
+        el.click();
+        return true;
+      }
+      window.addEventListener("__TTD_REACT_CLICK__", function(e) {
+        if (triggerReactClick(e.target)) {
+          e.preventDefault();
+        }
+      }, true);
+    })();
+  `;
+  (document.head || document.documentElement).appendChild(script);
+}
+ensurePageBridge();
+const SLOT_ADD_WAIT_MS = 100;
 const MAX_PILGRIM_SLOTS = 5;
 const FOLLOW_UP_CONTINUE_KEY = "ttdAutofillFollowUpContinue";
-const FOLLOW_UP_CONTINUE_POLL_MS = 100;
+const FOLLOW_UP_CONTINUE_POLL_MS = 40;
 // Different stages wait for very different things: the review/pay-now page
 // just needs to render (seconds), but actual payment (OTP, bank redirect,
 // etc.) can take minutes - a stage's watcher needs a timeout matched to what
@@ -41,7 +82,7 @@ const STAGE_TIMEOUT_MS = {
   generate: 10 * 60 * 1000, // waiting through actual payment completion
 };
 const FLOW_EXIT_GRACE_MS = 12000;
-const BOOKING_ERROR_PATTERN = /(pilgrim.*(booking|progress)|(booking|reservation).*(already|in progress)|already.*in progress)/i;
+const BOOKING_ERROR_PATTERN = /(?:booking|reservation)\s+(?:is\s+)?(?:already\s+)?in\s+progress/i;
 const AUTO_RUN_PREF_KEY = "ttdAutoRunOnLoad";
 const GROUPS_STORAGE_KEY = "ttdGroups";
 const CLICK_CONTINUE_PREF_KEY = "ttdClickContinuePref";
@@ -122,15 +163,29 @@ function showToast(message, kind = "info") {
 }
 
 function setNativeValue(el, value) {
-  const proto = Object.getPrototypeOf(el);
-  const descriptor = Object.getOwnPropertyDescriptor(proto, "value");
+  let proto = Object.getPrototypeOf(el);
+  let descriptor = Object.getOwnPropertyDescriptor(proto, "value");
+  while (proto && !descriptor) {
+    proto = Object.getPrototypeOf(proto);
+    if (proto) {
+      descriptor = Object.getOwnPropertyDescriptor(proto, "value");
+    }
+  }
   if (descriptor && descriptor.set) {
     descriptor.set.call(el, value);
   } else {
     el.value = value;
   }
+  
+  if (el._valueTracker) {
+    el._valueTracker.setValue('');
+  }
+
   el.dispatchEvent(new Event("input", { bubbles: true }));
   el.dispatchEvent(new Event("change", { bubbles: true }));
+  el.dispatchEvent(new KeyboardEvent("keydown", { bubbles: true, key: "Unidentified" }));
+  el.dispatchEvent(new KeyboardEvent("keypress", { bubbles: true, key: "Unidentified" }));
+  el.dispatchEvent(new KeyboardEvent("keyup", { bubbles: true, key: "Unidentified" }));
 }
 
 function normalizedFieldValue(value, label) {
@@ -183,9 +238,13 @@ function getAllLabeledInputs() {
   const labels = Array.from(document.querySelectorAll("label"));
   const pairs = [];
   for (const labelEl of labels) {
-    const wrapper = labelEl.closest('div[style*="position: relative"]');
-    if (!wrapper) continue;
-    const input = wrapper.querySelector("input");
+    let wrapper = labelEl.parentElement;
+    let input = null;
+    while (wrapper && wrapper !== document.body) {
+      input = wrapper.querySelector("input");
+      if (input) break;
+      wrapper = wrapper.parentElement;
+    }
     if (!input) continue;
     const clone = labelEl.cloneNode(true);
     clone.querySelectorAll("sup").forEach((s) => s.remove());
@@ -200,38 +259,54 @@ function findInputsByLabel(matchFn) {
     .map((p) => p.input);
 }
 
-// Sets a text field's value and verifies it actually stuck. Some fields
-// validate/react to typing differently than a bulk value assignment (e.g. a
-// formatter or validator that only runs off real keystrokes), so if the
-// plain approach doesn't stick, fall back to a character-by-character
-// simulated-typing pass, which is much closer to what a real user does.
+// Sets a text field's value and verifies it actually stuck.  TTD's current
+// React build only accepts *trusted* browser input events, so the primary
+// strategy is `document.execCommand('insertText')` which the browser treats
+// as genuine user input.  The old native-setter path and a char-by-char
+// execCommand pass are kept as fallbacks for edge cases / older builds.
 async function setTextFieldRobust(el, value, label) {
   if (!el || value === undefined || value === null || value === "") return false;
 
-  setNativeValue(el, value);
-  await sleep(80);
+  el.focus();
+  el.dispatchEvent(new Event("focus", { bubbles: true }));
+  await sleep(15);
+
+  // ---- Primary: bulk execCommand('insertText') ----
+  el.select();  // select any existing text so insertText replaces it
+  document.execCommand('insertText', false, String(value));
+  await sleep(25);
+
   if (fieldValuesMatch(el.value, value, label)) {
-    // Some forms only mark a field "touched" (and factor it into whether
-    // Continue is enabled) on blur - a value set via the fast path here
-    // never naturally fires one, so fire it explicitly.
+    el.blur();
     el.dispatchEvent(new Event("blur", { bubbles: true }));
-    console.log(`[TTD Autofill] ${label}: set OK.`);
+    console.log(`[TTD Autofill] ${label}: set OK via execCommand.`);
     return true;
   }
 
+  // ---- Fallback 1: native setter with _valueTracker reset ----
   console.warn(
-    `[TTD Autofill] ${label}: value didn't stick via direct set (got "${el.value}"), retrying with simulated typing.`
+    `[TTD Autofill] ${label}: execCommand didn't stick (got "${el.value}"), trying native setter.`
   );
-
   el.focus();
-  setNativeValue(el, "");
+  setNativeValue(el, value);
+  await sleep(80);
+  if (fieldValuesMatch(el.value, value, label)) {
+    el.blur();
+    el.dispatchEvent(new Event("blur", { bubbles: true }));
+    console.log(`[TTD Autofill] ${label}: set OK via native setter fallback.`);
+    return true;
+  }
+
+  // ---- Fallback 2: character-by-character execCommand ----
+  console.warn(
+    `[TTD Autofill] ${label}: native setter didn't stick (got "${el.value}"), trying char-by-char.`
+  );
+  el.focus();
+  el.select();
+  document.execCommand('delete', false, null);
   await sleep(30);
   for (const ch of String(value)) {
-    const next = el.value + ch;
-    setNativeValue(el, next);
-    el.dispatchEvent(new KeyboardEvent("keydown", { key: ch, bubbles: true }));
-    el.dispatchEvent(new KeyboardEvent("keypress", { key: ch, bubbles: true }));
-    el.dispatchEvent(new KeyboardEvent("keyup", { key: ch, bubbles: true }));
+    document.execCommand('insertText', false, ch);
     await sleep(20);
   }
   el.blur();
@@ -239,11 +314,11 @@ async function setTextFieldRobust(el, value, label) {
   await sleep(80);
 
   if (fieldValuesMatch(el.value, value, label)) {
-    console.log(`[TTD Autofill] ${label}: set OK via simulated typing fallback.`);
+    console.log(`[TTD Autofill] ${label}: set OK via char-by-char fallback.`);
     return true;
   }
 
-  console.warn(`[TTD Autofill] ${label}: still not set after retry (got "${el.value}").`);
+  console.warn(`[TTD Autofill] ${label}: still not set after all retries (got "${el.value}").`);
   return false;
 }
 
@@ -318,9 +393,9 @@ function findCardFieldByText(labelText) {
 function hasCardPaymentForm() {
   return Boolean(
     findCardFieldByText("Card number") ||
-      findCardFieldByText("Expiry (MM/YY)") ||
-      findCardFieldByText("CVV") ||
-      findCardFieldByText("Name on Card")
+    findCardFieldByText("Expiry (MM/YY)") ||
+    findCardFieldByText("CVV") ||
+    findCardFieldByText("Name on Card")
   );
 }
 
@@ -363,47 +438,119 @@ function getPilgrimFieldArrays() {
 }
 
 function fireFullClickSequence(el) {
-  const opts = { bubbles: true, cancelable: true, view: window };
-  ["pointerdown", "mousedown", "pointerup", "mouseup"].forEach((type) => {
-    try {
-      el.dispatchEvent(new PointerEvent(type, opts));
-    } catch (e) {
-      el.dispatchEvent(new MouseEvent(type, opts));
-    }
-  });
+  const rect = el.getBoundingClientRect();
+  const x = Math.max(0, rect.left + rect.width / 2);
+  const y = Math.max(0, rect.top + rect.height / 2);
+  const opts = {
+    bubbles: true, cancelable: true, view: window,
+    clientX: x, clientY: y, screenX: x, screenY: y,
+    button: 0, buttons: 1,
+  };
+  const pointerOpts = { ...opts, pointerId: 1, pointerType: "mouse" };
+
+  try {
+    const touch = new Touch({ identifier: Date.now(), target: el, clientX: x, clientY: y, screenX: x, screenY: y });
+    el.dispatchEvent(new TouchEvent("touchstart", { bubbles: true, cancelable: true, changedTouches: [touch], targetTouches: [touch], touches: [touch] }));
+    el.dispatchEvent(new TouchEvent("touchend", { bubbles: true, cancelable: true, changedTouches: [touch], targetTouches: [touch], touches: [touch] }));
+  } catch (e) {
+    // TouchEvent might not be supported on all desktop environments, ignore if so.
+  }
+
+  el.dispatchEvent(new PointerEvent("pointerdown", pointerOpts));
+  el.dispatchEvent(new MouseEvent("mousedown", opts));
   el.focus();
+  el.dispatchEvent(new PointerEvent("pointerup", pointerOpts));
+  el.dispatchEvent(new MouseEvent("mouseup", opts));
   el.click();
+}
+
+// Bridges React synthetic events in the page context.
+function fireReactClick(el) {
+  if (!el) return;
+  ensurePageBridge();
+  el.focus();
+  const evt = new CustomEvent("__TTD_REACT_CLICK__", { bubbles: true, cancelable: true });
+  el.dispatchEvent(evt);
+  if (!evt.defaultPrevented) {
+    el.click();
+  }
+}
+
+function normalizeOptionText(text) {
+  return String(text || "").toLowerCase().replace(/[^a-z0-9]/g, "");
+}
+
+function matchOptionText(actual, expected) {
+  const a = normalizeOptionText(actual);
+  const b = normalizeOptionText(expected);
+  if (!a || !b) return false;
+
+  // Exact match (e.g. "male" === "male", "female" === "female")
+  if (a === b) return true;
+
+  // CRITICAL: Gender values MUST be exact matches because "male" is a substring of "female"!
+  const genders = ["male", "female", "transgender"];
+  if (genders.includes(a) || genders.includes(b)) {
+    return a === b;
+  }
+
+  // ID Proof variations (e.g. Aadhaar Card vs Aadhar Card)
+  const isAadhaarA = a.includes("aadhar") || a.includes("aadhaar");
+  const isAadhaarB = b.includes("aadhar") || b.includes("aadhaar");
+  if (isAadhaarA && isAadhaarB) return true;
+
+  if (a.includes("passport") && b.includes("passport")) return true;
+  if (a.includes("voter") && b.includes("voter")) return true;
+
+  // Multi-word fallback for other non-gender fields
+  if (b.length >= 4 && (a.includes(b) || b.includes(a))) return true;
+
+  return false;
 }
 
 // Finds the dropdown list that appears after clicking a custom-dropdown
 // input, and clicks the <li> option whose text matches `value`.
+// TTD's current build requires direct React onClick triggering with trusted
+// mock events. We dispatch __TTD_REACT_CLICK__ which page-bridge.js handles
+// in the page's MAIN world.
 async function selectDropdownOption(inputEl, value, label) {
   if (!value) return false;
 
-  // The input, its label overlay, and the opened options list all sit as
-  // direct children of the same wrapper div (the one with
-  // style="position: relative"). That wrapper is what we search.
-  const wrapper =
-    inputEl.closest('div[style*="position: relative"]') || inputEl.parentElement;
+  const wrapper = inputEl.parentElement;
 
-  fireFullClickSequence(inputEl);
+  // Search for dropdown options in the wrapper first, then document-wide.
+  const findOptions = () => {
+    // 1. Original CSS-modules selector inside the wrapper
+    let found = Array.from(wrapper.querySelectorAll(DROPDOWN_OPTION_SELECTOR));
+    if (found.length > 0) return found;
 
-  let options = await waitForCondition(() => {
-    const found = Array.from(wrapper.querySelectorAll(DROPDOWN_OPTION_SELECTOR));
-    return found.length > 0 ? found : null;
-  }, 1500, 60);
+    // 2. CSS-modules selector anywhere in the document (portal rendering)
+    found = Array.from(document.querySelectorAll(DROPDOWN_OPTION_SELECTOR));
+    if (found.length > 0) return found;
 
-  // If nothing opened, try clicking the dropdown arrow icon next to the
-  // input as a fallback - some builds bind the toggle handler there instead.
+    return null;
+  };
+
+  // Attempt 1: click the input itself via React bridge
+  fireReactClick(inputEl);
+  let options = await waitForCondition(findOptions, 1200, 20);
+
+  // Attempt 2: click the dropdown arrow icon
   if (!options) {
-    const icon = wrapper.querySelector('img[alt="dropdown icon"]');
+    const icon =
+      wrapper.querySelector('img[alt="dropdown icon"]') ||
+      wrapper.querySelector('img[src*="dropdown"]') ||
+      wrapper.querySelector('svg');
     if (icon) {
-      fireFullClickSequence(icon);
-      options = await waitForCondition(() => {
-        const found = Array.from(wrapper.querySelectorAll(DROPDOWN_OPTION_SELECTOR));
-        return found.length > 0 ? found : null;
-      }, 1500, 60);
+      fireReactClick(icon);
+      options = await waitForCondition(findOptions, 1200, 20);
     }
+  }
+
+  // Attempt 3: click the wrapper div itself
+  if (!options) {
+    fireReactClick(wrapper);
+    options = await waitForCondition(findOptions, 800, 20);
   }
 
   if (!options) {
@@ -413,20 +560,18 @@ async function selectDropdownOption(inputEl, value, label) {
     return false;
   }
 
-  const target = options.find(
-    (opt) => opt.textContent.trim().toLowerCase() === value.trim().toLowerCase()
-  );
+  const target = options.find((opt) => matchOptionText(opt.textContent, value));
 
   if (target) {
-    fireFullClickSequence(target);
-    await sleep(150);
+    fireReactClick(target);
+    await sleep(60);
     console.log(`[TTD Autofill] "${label}" set to "${value}".`);
     return true;
   }
 
   console.warn(
     `[TTD Autofill] "${label}" dropdown opened but no option matched "${value}". ` +
-      `Options seen: ${options.map((o) => o.textContent.trim()).join(", ")}`
+    `Options seen: ${options.map((o) => o.textContent.trim()).join(", ")}`
   );
   document.body.click(); // close the dropdown so the page isn't left stuck open
   return false;
@@ -439,8 +584,8 @@ function getButtonText(button) {
 function isButtonAvailable(button) {
   return Boolean(
     button &&
-      !button.disabled &&
-      button.getAttribute("aria-disabled") !== "true"
+    !button.disabled &&
+    button.getAttribute("aria-disabled") !== "true"
   );
 }
 
@@ -462,7 +607,7 @@ async function clickContinueIfEnabled(timeoutMs = 4000) {
     if (!btn || !clickButtonIfEnabled(btn)) return null;
     lastClickedContinueButton = btn;
     return true;
-  }, timeoutMs, 100);
+  }, timeoutMs, 25);
   return !!clicked;
 }
 
@@ -484,10 +629,13 @@ function findGenerateButton() {
   ) || null;
 }
 
+let generateButtonClicked = false;
 function clickGenerateIfEnabled() {
+  if (generateButtonClicked) return false;
   const btn = findGenerateButton();
   if (btn) {
-    fireFullClickSequence(btn);
+    generateButtonClicked = true;
+    fireReactClick(btn);
     return true;
   }
   return false;
@@ -504,11 +652,11 @@ function findNextContinueButton(allowLastClicked = false) {
 function hasBookingFlowControls() {
   return Boolean(
     getPilgrimFieldArrays().name.length ||
-      findNextContinueButton() ||
-      findPayNowButton() ||
-      Array.from(document.querySelectorAll("button, [role=\"button\"]")).some(
-        (button) => GENERATE_TEXT_PATTERN.test(getButtonText(button))
-      )
+    findNextContinueButton() ||
+    findPayNowButton() ||
+    Array.from(document.querySelectorAll("button, [role=\"button\"]")).some(
+      (button) => GENERATE_TEXT_PATTERN.test(getButtonText(button))
+    )
   );
 }
 
@@ -762,8 +910,9 @@ async function tryAddPilgrimSlot() {
   const buttons = Array.from(document.querySelectorAll("button, a, div[role='button']"));
   const addBtn = buttons.find((b) => ADD_PILGRIM_TEXT_PATTERN.test(b.textContent || ""));
   if (!addBtn) return false;
+  const oldCount = getPilgrimFieldArrays().name.length;
   addBtn.click();
-  await sleep(SLOT_ADD_WAIT_MS);
+  await waitForCondition(() => (getPilgrimFieldArrays().name.length > oldCount ? true : null), 400, 25);
   return true;
 }
 
@@ -793,6 +942,7 @@ async function fillPilgrimAtIndex(fields, index, pilgrim) {
     }
   };
 
+  // --- Text fields first ---
   await safe(async () => {
     const el = fields.name[index];
     if (el) await setTextFieldRobust(el, pilgrim.name, `Name (${pilgrim.name})`);
@@ -803,24 +953,32 @@ async function fillPilgrimAtIndex(fields, index, pilgrim) {
     if (el) await setTextFieldRobust(el, pilgrim.age, `Age (${pilgrim.name})`);
   }, "Age");
 
+  // --- Re-query fields for dropdowns ---
+  await sleep(30);
+
   await safe(async () => {
-    const el = fields.gender[index];
+    const fieldsNow = getPilgrimFieldArrays();
+    const el = fieldsNow.gender[index];
     if (el && pilgrim.gender) await selectDropdownOption(el, pilgrim.gender, `Gender (${pilgrim.name})`);
   }, "Gender");
 
   await safe(async () => {
-    const el = fields.idType[index];
+    await sleep(40);
+    const fieldsNow = getPilgrimFieldArrays();
+    const el = fieldsNow.idType[index];
     if (el && pilgrim.idType) await selectDropdownOption(el, pilgrim.idType, `Photo ID Proof (${pilgrim.name})`);
   }, "Photo ID Proof");
 
   await safe(async () => {
-    // idNumber is typically disabled until idType is chosen - poll briefly so
-    // the page has time to enable it after the dropdown selection above.
-    const el = fields.idNumber[index];
-    if (el && pilgrim.idNumber) {
-      const enabled = await waitForCondition(() => (!el.disabled ? true : null), 1000, 60);
+    // idNumber is typically disabled until idType is chosen - poll rapidly so
+    // it fills the moment React enables it.
+    if (pilgrim.idNumber) {
+      const enabled = await waitForCondition(() => {
+        const current = getPilgrimFieldArrays().idNumber[index];
+        return current && !current.disabled ? current : null;
+      }, 2000, 20);
       if (enabled) {
-        await setTextFieldRobust(el, pilgrim.idNumber, `Photo ID Number (${pilgrim.name})`);
+        await setTextFieldRobust(enabled, pilgrim.idNumber, `Photo ID Number (${pilgrim.name})`);
       } else {
         console.warn(
           `[TTD Autofill] Photo ID Number field for "${pilgrim.name}" stayed disabled - idType selection may not have registered.`
@@ -836,15 +994,22 @@ async function revisitErroredFields() {
 
   let revisitedCount = 0;
   for (const errorIcon of errorIcons) {
-    const fieldWrapper = errorIcon.closest('div[style*="position: relative"]');
-    const input = fieldWrapper?.querySelector("input");
-    if (!input || input.disabled) continue;
+    let fieldWrapper = errorIcon.parentElement;
+    let input = null;
+    while (fieldWrapper && fieldWrapper !== document.body) {
+      input = fieldWrapper.querySelector("input");
+      if (input) break;
+      fieldWrapper = fieldWrapper.parentElement;
+    }
+    if (!input || input.disabled || input.readOnly) continue;
 
-    // Re-send the existing value so React's controlled state catches up with
-    // the visible DOM value, then perform the same focus/blur interaction as
-    // a user revisiting the field without changing its contents.
-    setNativeValue(input, input.value);
-    fireFullClickSequence(input);
+    // Re-send the existing value using execCommand so React's controlled
+    // state catches up (the native setter no longer triggers React's change
+    // detection on TTD's current build).
+    const currentValue = input.value;
+    input.focus();
+    input.select();
+    document.execCommand('insertText', false, currentValue);
     await sleep(50);
     input.blur();
     input.dispatchEvent(new Event("blur", { bubbles: true }));
@@ -864,59 +1029,57 @@ async function autofill(general, pilgrims, clickContinue, clickPayNow, paymentMe
   try {
     showToast(`Filling ${pilgrims.length} pilgrim(s)...`, "info");
 
-  const safeGeneral = async (matchFn, value, label) => {
-    try {
-      await fillGeneralField(matchFn, value, label);
-    } catch (err) {
-      console.warn(`[TTD Autofill] ${label} (general) threw an error, continuing with the rest:`, err);
+    const safeGeneral = async (matchFn, value, label) => {
+      try {
+        await fillGeneralField(matchFn, value, label);
+      } catch (err) {
+        console.warn(`[TTD Autofill] ${label} (general) threw an error, continuing with the rest:`, err);
+      }
+    };
+
+    // 1. General details (once, if this seva's page even has that section -
+    // some, like the Ammavari/PAT Special Entry form, don't), matched by
+    // label text regardless of which `name` attribute or section position
+    // this particular seva form uses.
+    await safeGeneral((n) => n.includes("email"), general.email, "Email");
+    await safeGeneral((n) => n === "city", general.city, "City");
+    await safeGeneral((n) => n === "state", general.state, "State");
+    await safeGeneral((n) => n === "country", general.country, "Country");
+    await safeGeneral((n) => n === "pincode", general.pincode, "Pincode");
+
+    // 2. Make sure there are enough pilgrim rows, then fill by index.
+    const rowCount = await ensureEnoughPilgrimRows(pilgrims.length);
+    const fields = getPilgrimFieldArrays(); // re-read in case rows were just added
+
+    let filledCount = 0;
+    for (let i = 0; i < rowCount && i < pilgrims.length; i++) {
+      await fillPilgrimAtIndex(fields, i, pilgrims[i]);
+      filledCount++;
     }
-  };
 
-  // 1. General details (once, if this seva's page even has that section -
-  // some, like the Ammavari/PAT Special Entry form, don't), matched by
-  // label text regardless of which `name` attribute or section position
-  // this particular seva form uses.
-  await safeGeneral((n) => n.includes("email"), general.email, "Email");
-  await safeGeneral((n) => n === "city", general.city, "City");
-  await safeGeneral((n) => n === "state", general.state, "State");
-  await safeGeneral((n) => n === "country", general.country, "Country");
-  await safeGeneral((n) => n === "pincode", general.pincode, "Pincode");
+    const unfilledCount = Math.max(0, pilgrims.length - rowCount);
+    await sleep(40);
+    await revisitErroredFields();
 
-  // 2. Make sure there are enough pilgrim rows, then fill by index.
-  const rowCount = await ensureEnoughPilgrimRows(pilgrims.length);
-  const fields = getPilgrimFieldArrays(); // re-read in case rows were just added
-
-  let filledCount = 0;
-  for (let i = 0; i < rowCount && i < pilgrims.length; i++) {
-    await fillPilgrimAtIndex(fields, i, pilgrims[i]);
-    filledCount++;
-  }
-
-  const unfilledCount = Math.max(0, pilgrims.length - rowCount);
-  await sleep(150);
-  await revisitErroredFields();
-
-  let continueClicked = false;
-  if (clickContinue) {
-    // Give the page a moment to finish validating the freshly-filled
-    // fields before checking whether Continue is enabled.
-    await sleep(150);
-    continueClicked = await clickContinueIfEnabled();
-    if (continueClicked) {
-      showToast("Filled + clicked Continue. Watching for the review page...", "success");
+    let continueClicked = false;
+    if (clickContinue) {
+      await sleep(40);
+      continueClicked = await clickContinueIfEnabled();
+      if (continueClicked) {
+        showToast("Filled + clicked Continue. Watching for the review page...", "success");
         scheduleFollowUpContinue(clickPayNow, paymentMethod, cardDetails);
+      } else {
+        showToast(
+          `Filled ${filledCount} pilgrim(s), but Continue wasn't enabled yet - check for a missing/invalid field.`,
+          "error"
+        );
+      }
     } else {
       showToast(
-        `Filled ${filledCount} pilgrim(s), but Continue wasn't enabled yet - check for a missing/invalid field.`,
-        "error"
+        `Filled ${filledCount} pilgrim(s).` + (unfilledCount ? ` ${unfilledCount} had no row.` : ""),
+        "success"
       );
     }
-  } else {
-    showToast(
-      `Filled ${filledCount} pilgrim(s).` + (unfilledCount ? ` ${unfilledCount} had no row.` : ""),
-      "success"
-    );
-  }
 
     return { filledCount, unfilledCount, continueClicked };
   } finally {

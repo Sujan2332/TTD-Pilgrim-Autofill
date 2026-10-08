@@ -33,8 +33,20 @@
   "content_scripts": [
     {
       "matches": ["https://ttdevasthanams.ap.gov.in/*"],
+      "js": ["page-bridge.js"],
+      "world": "MAIN",
+      "run_at": "document_start"
+    },
+    {
+      "matches": ["https://ttdevasthanams.ap.gov.in/*"],
       "js": ["content.js"],
       "run_at": "document_idle"
+    }
+  ],
+  "web_accessible_resources": [
+    {
+      "resources": ["page-bridge.js"],
+      "matches": ["https://ttdevasthanams.ap.gov.in/*"]
     }
   ]
 }
