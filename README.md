@@ -22,6 +22,10 @@ Maybe you travel as a family and book for different combinations on different da
 
 | Feature | Description |
 |--------|-------------|
+| **Tabbed Control Center** | Organized into **⚡ Seva &amp; Sniper** and **👥 Pilgrim Details** tabs for a clean, clutter-free interface. |
+| **Calendar &amp; Slot Auto-Picker** | Automatically selects target date (Option A) or first green date, preferred slot time, tickets, and clicks Continue into the form. |
+| **Atomic Clock Calibration** | Pings TTD's web server to calculate local clock drift and round-trip latency in milliseconds. |
+| **Quota Drop Sniper** | Sub-millisecond precision scheduler that triggers booking action right at the quota drop (e.g. 09:59:59.750 for 10:00 AM). |
 | **Multiple groups** | Store several families or trip combinations (default: 3 groups, 5 pilgrims each). Add more with **+ Add Group**. |
 | **General + pilgrim details** | Email, address fields, and per-pilgrim name, age, gender, ID type, ID number. |
 | **Select who books today** | Check only the pilgrims you need; autofill uses the first selected pilgrim’s group for general details. |
@@ -29,7 +33,7 @@ Maybe you travel as a family and book for different combinations on different da
 | **One-click autofill** | Fills fields on `ttdevasthanams.ap.gov.in` by matching visible label text (works across many seva form layouts). |
 | **Keyboard shortcut** | `Ctrl+Shift+Y` on the TTD tab (pilgrims must be selected in the popup first). |
 | **Auto-run on load** | When enabled, runs autofill as soon as the pilgrim form appears (after you’ve selected pilgrims). |
-| **Continue & Pay Now** | Optional: click through Continue / Confirm and Pay Now after filling. |
+| **Continue &amp; Pay Now** | Optional: click through Continue / Confirm and Pay Now after filling. |
 | **Payment helper** | Choose **UPI / Generate QR** or **Credit / Debit card**; card details can be stored locally or imported from JSON. |
 | **On-page toasts** | Status messages appear on the TTD page even when the popup is closed. |
 

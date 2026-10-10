@@ -5,6 +5,9 @@ const CLICK_CONTINUE_PREF_KEY = "ttdClickContinuePref";
 const PAYMENT_METHOD_PREF_KEY = "ttdPaymentMethodPref";
 const CARD_DETAILS_PREF_KEY = "ttdCardDetailsPref";
 const AUTO_RUN_PREF_KEY = "ttdAutoRunOnLoad";
+const SNIPER_CONFIG_KEY = "ttdSniperConfig";
+const ACTIVE_TAB_KEY = "ttdActiveTab";
+const SERVER_DRIFT_KEY = "ttdServerDrift";
 const POPUP_WIDTH_STORAGE_KEY = "ttdPopupWidth";
 const POPUP_WIDTH_DEFAULT = 430;
 const POPUP_WIDTH_MIN = 430;
@@ -583,6 +586,248 @@ async function handleExport() {
   setStatus("JSON downloaded successfully. It is ready to reuse or share.");
 }
 
+function getDefaultSniperConfig() {
+  return {
+    targetSeva: "Special Entry Darshan",
+    autoClickTargetSeva: false,
+    autoPickerEnabled: true,
+    targetDate: "",
+    fallbackGreenDate: true,
+    preferredSlot: "any",
+    ticketCount: "auto",
+    autoContinueCalendar: true,
+    sniperEnabled: false,
+    dropTime: "10:00:00",
+    leadTimeMs: 250,
+  };
+}
+
+async function loadSniperConfig() {
+  return new Promise((resolve) => {
+    chrome.storage.local.get([SNIPER_CONFIG_KEY], (res) => {
+      resolve(Object.assign(getDefaultSniperConfig(), res[SNIPER_CONFIG_KEY] || {}));
+    });
+  });
+}
+
+function getSniperConfigFromInputs() {
+  return {
+    targetSeva: document.getElementById("targetSevaSelect")?.value || "Special Entry Darshan",
+    autoClickTargetSeva: !!document.getElementById("autoClickTargetSevaCheckbox")?.checked,
+    autoPickerEnabled: !!document.getElementById("autoPickerEnabledCheckbox")?.checked,
+    targetDate: document.getElementById("targetDateField")?.value || "",
+    fallbackGreenDate: !!document.getElementById("fallbackGreenDateCheckbox")?.checked,
+    preferredSlot: document.getElementById("preferredSlotSelect")?.value || "any",
+    ticketCount: document.getElementById("ticketCountSelect")?.value || "auto",
+    autoContinueCalendar: !!document.getElementById("autoContinueCalendarCheckbox")?.checked,
+    sniperEnabled: !!document.getElementById("sniperEnabledToggle")?.checked,
+    dropTime: document.getElementById("sniperDropTimeInput")?.value || "10:00:00",
+    leadTimeMs: parseInt(document.getElementById("sniperLeadTimeInput")?.value, 10) || 250,
+  };
+}
+
+function applySniperConfigToInputs(config) {
+  if (document.getElementById("targetSevaSelect")) {
+    document.getElementById("targetSevaSelect").value = config.targetSeva || "Special Entry Darshan";
+  }
+  if (document.getElementById("autoClickTargetSevaCheckbox")) {
+    document.getElementById("autoClickTargetSevaCheckbox").checked = !!config.autoClickTargetSeva;
+  }
+  if (document.getElementById("autoPickerEnabledCheckbox")) {
+    document.getElementById("autoPickerEnabledCheckbox").checked = config.autoPickerEnabled !== false;
+  }
+  if (document.getElementById("targetDateField")) {
+    document.getElementById("targetDateField").value = config.targetDate || "";
+    // Restrict date picker to today onwards
+    const todayStr = new Date().toISOString().split("T")[0];
+    document.getElementById("targetDateField").min = todayStr;
+  }
+  if (document.getElementById("fallbackGreenDateCheckbox")) {
+    document.getElementById("fallbackGreenDateCheckbox").checked = config.fallbackGreenDate !== false;
+  }
+  if (document.getElementById("preferredSlotSelect")) {
+    document.getElementById("preferredSlotSelect").value = config.preferredSlot || "any";
+  }
+  if (document.getElementById("ticketCountSelect")) {
+    document.getElementById("ticketCountSelect").value = config.ticketCount || "auto";
+  }
+  if (document.getElementById("autoContinueCalendarCheckbox")) {
+    document.getElementById("autoContinueCalendarCheckbox").checked = config.autoContinueCalendar !== false;
+  }
+  if (document.getElementById("sniperEnabledToggle")) {
+    document.getElementById("sniperEnabledToggle").checked = !!config.sniperEnabled;
+  }
+  if (document.getElementById("sniperDropTimeInput")) {
+    document.getElementById("sniperDropTimeInput").value = config.dropTime || "10:00:00";
+  }
+  if (document.getElementById("sniperLeadTimeInput")) {
+    document.getElementById("sniperLeadTimeInput").value = config.leadTimeMs ?? 250;
+  }
+}
+
+function initTabs(initialTab) {
+  const tabSevaBtn = document.getElementById("tabSevaBtn");
+  const tabPilgrimsBtn = document.getElementById("tabPilgrimsBtn");
+  const tabSevaContent = document.getElementById("tabSevaContent");
+  const tabPilgrimsContent = document.getElementById("tabPilgrimsContent");
+
+  function switchTab(tab) {
+    if (tab === "pilgrims") {
+      tabPilgrimsBtn.classList.add("active");
+      tabPilgrimsBtn.setAttribute("aria-selected", "true");
+      tabSevaBtn.classList.remove("active");
+      tabSevaBtn.setAttribute("aria-selected", "false");
+      tabPilgrimsContent.classList.add("active");
+      tabSevaContent.classList.remove("active");
+    } else {
+      tabSevaBtn.classList.add("active");
+      tabSevaBtn.setAttribute("aria-selected", "true");
+      tabPilgrimsBtn.classList.remove("active");
+      tabPilgrimsBtn.setAttribute("aria-selected", "false");
+      tabSevaContent.classList.add("active");
+      tabPilgrimsContent.classList.remove("active");
+    }
+    chrome.storage.local.set({ [ACTIVE_TAB_KEY]: tab });
+  }
+
+  tabSevaBtn?.addEventListener("click", () => switchTab("seva"));
+  tabPilgrimsBtn?.addEventListener("click", () => switchTab("pilgrims"));
+
+  switchTab(initialTab || "seva");
+}
+
+let currentDriftMs = 0;
+
+function formatLiveTime(timestamp) {
+  const d = new Date(timestamp);
+  const hh = String(d.getHours()).padStart(2, "0");
+  const mm = String(d.getMinutes()).padStart(2, "0");
+  const ss = String(d.getSeconds()).padStart(2, "0");
+  const ms = String(Math.floor(d.getMilliseconds() / 100));
+  return `${hh}:${mm}:${ss}.${ms}`;
+}
+
+function updateLiveClockDisplay() {
+  const clockEl = document.getElementById("ttdLiveClock");
+  if (!clockEl) return;
+  const ttdTime = Date.now() + currentDriftMs;
+  clockEl.textContent = formatLiveTime(ttdTime);
+}
+
+function updateCountdownDisplay() {
+  const countdownEl = document.getElementById("sniperCountdownDisplay");
+  const toggle = document.getElementById("sniperEnabledToggle");
+  const dropTimeInput = document.getElementById("sniperDropTimeInput");
+  const leadTimeInput = document.getElementById("sniperLeadTimeInput");
+  if (!countdownEl || !toggle || !dropTimeInput) return;
+
+  if (!toggle.checked) {
+    countdownEl.textContent = "Sniper Idle (Toggle ON to arm)";
+    countdownEl.className = "sniper-countdown-badge";
+    return;
+  }
+
+  const dropTimeParts = dropTimeInput.value.split(":");
+  if (dropTimeParts.length < 2) return;
+
+  const now = new Date(Date.now() + currentDriftMs);
+  const targetDate = new Date(now);
+  targetDate.setHours(
+    parseInt(dropTimeParts[0], 10),
+    parseInt(dropTimeParts[1], 10),
+    parseInt(dropTimeParts[2] || 0, 10),
+    0
+  );
+
+  let diffMs = targetDate.getTime() - now.getTime();
+  const leadMs = parseInt(leadTimeInput?.value, 10) || 0;
+  const triggerDiffMs = diffMs - leadMs;
+
+  if (triggerDiffMs > 0) {
+    const totalSecs = Math.floor(triggerDiffMs / 1000);
+    const hrs = String(Math.floor(totalSecs / 3600)).padStart(2, "0");
+    const mins = String(Math.floor((totalSecs % 3600) / 60)).padStart(2, "0");
+    const secs = String(totalSecs % 60).padStart(2, "0");
+    const ms = String(triggerDiffMs % 1000).padStart(3, "0");
+
+    countdownEl.textContent = `Drop in ${hrs}:${mins}:${secs}.${ms} (-${leadMs}ms lead)`;
+    countdownEl.className =
+      triggerDiffMs < 10000 ? "sniper-countdown-badge armed urgent" : "sniper-countdown-badge armed";
+  } else if (triggerDiffMs > -10000) {
+    countdownEl.textContent = `Sniper fired - executing quota pickup`;
+    countdownEl.className = "sniper-countdown-badge armed urgent";
+
+    if (triggerDiffMs <= 0 && triggerDiffMs > -3000 && lastFiredDropTime !== dropTimeInput.value) {
+      lastFiredDropTime = dropTimeInput.value;
+      const cfg = getSniperConfigFromInputs();
+      chrome.tabs.query({ active: true, currentWindow: true }).then(([tab]) => {
+        if (tab?.id && tab.url?.includes("ttdevasthanams.ap.gov.in")) {
+          chrome.tabs.sendMessage(tab.id, { action: "EXECUTE_SNIPER_NOW", config: cfg });
+        }
+      });
+    }
+  } else {
+    countdownEl.textContent = `Drop time has passed for today (${dropTimeInput.value})`;
+    countdownEl.className = "sniper-countdown-badge";
+  }
+}
+
+let lastFiredDropTime = "";
+
+async function calibrateClock() {
+  const driftBadge = document.getElementById("clockDriftBadge");
+  const syncBtn = document.getElementById("syncClockBtn");
+  if (driftBadge) {
+    driftBadge.className = "drift-badge calibrating";
+    driftBadge.textContent = "Syncing...";
+  }
+  if (syncBtn) syncBtn.disabled = true;
+
+  try {
+    const res = await new Promise((resolve) => {
+      chrome.runtime.sendMessage({ action: "GET_SERVER_TIME" }, resolve);
+    });
+
+    if (res && res.ok) {
+      currentDriftMs = res.drift;
+      chrome.storage.local.set({ [SERVER_DRIFT_KEY]: currentDriftMs });
+      if (driftBadge) {
+        driftBadge.className = "drift-badge calibrated";
+        const sign = currentDriftMs >= 0 ? "+" : "";
+        driftBadge.textContent = `Drift: ${sign}${currentDriftMs}ms (RTT: ${res.rtt}ms)`;
+      }
+      setStatus(`Clock calibrated! Drift: ${currentDriftMs}ms (RTT: ${res.rtt}ms)`, "success");
+    } else {
+      if (driftBadge) {
+        driftBadge.className = "drift-badge uncalibrated";
+        driftBadge.textContent = "Offline/Error";
+      }
+    }
+  } catch (err) {
+    if (driftBadge) {
+      driftBadge.className = "drift-badge uncalibrated";
+      driftBadge.textContent = "Error";
+    }
+  } finally {
+    if (syncBtn) syncBtn.disabled = false;
+  }
+}
+
+async function handleConfigAutoSave() {
+  const cfg = getSniperConfigFromInputs();
+  await chrome.storage.local.set({ [SNIPER_CONFIG_KEY]: cfg });
+  updateCountdownDisplay();
+
+  try {
+    const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+    if (tab?.id && tab.url?.includes("ttdevasthanams.ap.gov.in")) {
+      chrome.tabs.sendMessage(tab.id, { action: "INIT_SNIPER_SCHEDULER", config: cfg });
+    }
+  } catch (err) {
+    // Tab querying or messaging error ignored
+  }
+}
+
 (async function init() {
   const storedPopupWidth = await new Promise((resolve) => {
     chrome.storage.local.get([POPUP_WIDTH_STORAGE_KEY], (res) => {
@@ -592,6 +837,77 @@ async function handleExport() {
   });
   initPopupResize(storedPopupWidth);
 
+  // Initialize Tabs
+  const storedActiveTab = await new Promise((resolve) => {
+    chrome.storage.local.get([ACTIVE_TAB_KEY], (res) => resolve(res[ACTIVE_TAB_KEY] || "seva"));
+  });
+  initTabs(storedActiveTab);
+
+  // Initialize Seva & Sniper Config
+  const sniperConfig = await loadSniperConfig();
+  applySniperConfigToInputs(sniperConfig);
+
+  // Initialize Clock Calibration & Drift
+  const storedDrift = await new Promise((resolve) => {
+    chrome.storage.local.get([SERVER_DRIFT_KEY], (res) => resolve(res[SERVER_DRIFT_KEY] || 0));
+  });
+  currentDriftMs = storedDrift || 0;
+  const driftBadge = document.getElementById("clockDriftBadge");
+  if (driftBadge && storedDrift) {
+    driftBadge.className = "drift-badge calibrated";
+    const sign = storedDrift >= 0 ? "+" : "";
+    driftBadge.textContent = `Drift: ${sign}${storedDrift}ms`;
+  }
+
+  // Start live clock ticks & countdown
+  updateLiveClockDisplay();
+  updateCountdownDisplay();
+  setInterval(updateLiveClockDisplay, 200);
+  setInterval(updateCountdownDisplay, 50);
+
+  // Attach tab 1 events
+  document.getElementById("syncClockBtn")?.addEventListener("click", calibrateClock);
+
+  // Auto-save on changing any input in Tab 1
+  [
+    "targetSevaSelect",
+    "autoClickTargetSevaCheckbox",
+    "autoPickerEnabledCheckbox",
+    "targetDateField",
+    "fallbackGreenDateCheckbox",
+    "preferredSlotSelect",
+    "ticketCountSelect",
+    "autoContinueCalendarCheckbox",
+    "sniperEnabledToggle",
+    "sniperDropTimeInput",
+    "sniperLeadTimeInput",
+  ].forEach((id) => {
+    const el = document.getElementById(id);
+    if (el) {
+      el.addEventListener("change", handleConfigAutoSave);
+      if (el.tagName === "INPUT" && (el.type === "text" || el.type === "number" || el.type === "time" || el.type === "date")) {
+        el.addEventListener("input", handleConfigAutoSave);
+      }
+    }
+  });
+
+  // Preset pills
+  document.querySelectorAll(".preset-pill").forEach((pill) => {
+    pill.addEventListener("click", () => {
+      document.querySelectorAll(".preset-pill").forEach((p) => p.classList.remove("active"));
+      pill.classList.add("active");
+      const dropTimeInput = document.getElementById("sniperDropTimeInput");
+      if (dropTimeInput) {
+        dropTimeInput.value = pill.dataset.time;
+        handleConfigAutoSave();
+      }
+    });
+  });
+
+  // Automatically calibrate clock if uncalibrated or fresh open
+  calibrateClock();
+
+  // Tab 2: Pilgrim Groups and Preferences
   const groups = await loadData();
   render(groups);
 
@@ -605,17 +921,15 @@ async function handleExport() {
   const cvvInput = document.querySelector('[data-field="cvv"]');
   const cardNameInput = document.querySelector('[data-field="cardName"]');
   const storedPrefs = await new Promise((resolve) => {
-    chrome.storage.local.get([
-      CLICK_CONTINUE_PREF_KEY,
-      PAYMENT_METHOD_PREF_KEY,
-      CARD_DETAILS_PREF_KEY,
-      AUTO_RUN_PREF_KEY,
-    ], resolve);
+    chrome.storage.local.get(
+      [CLICK_CONTINUE_PREF_KEY, PAYMENT_METHOD_PREF_KEY, CARD_DETAILS_PREF_KEY, AUTO_RUN_PREF_KEY],
+      resolve
+    );
   });
   // Default to checked (matches the HTML default) if no preference saved yet.
   clickContinueCheckbox.checked =
     storedPrefs[CLICK_CONTINUE_PREF_KEY] === undefined ? true : !!storedPrefs[CLICK_CONTINUE_PREF_KEY];
- 
+
   const savedPaymentMethod = storedPrefs[PAYMENT_METHOD_PREF_KEY] || "upi";
   paymentMethodRadios.forEach((radio) => {
     radio.checked = radio.value === savedPaymentMethod;

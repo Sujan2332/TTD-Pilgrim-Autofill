@@ -63,3 +63,49 @@ async function triggerAutofillFromShortcut() {
 chrome.commands.onCommand.addListener((command) => {
   if (command === "autofill-selected") triggerAutofillFromShortcut();
 });
+
+// Atomic Server Clock Synchronization
+async function measureServerDrift() {
+  const samples = [];
+  for (let i = 0; i < 3; i++) {
+    const t0 = Date.now();
+    try {
+      const res = await fetch(`https://ttdevasthanams.ap.gov.in/?_t=${t0}_${i}`, {
+        method: "HEAD",
+        cache: "no-store",
+      });
+      const t1 = Date.now();
+      const rtt = t1 - t0;
+      const dateHeader = res.headers.get("date");
+      if (dateHeader) {
+        const serverSecMs = new Date(dateHeader).getTime();
+        const estimatedServerMs = serverSecMs + Math.round(rtt / 2);
+        const drift = estimatedServerMs - t1;
+        samples.push({ drift, rtt, serverTime: estimatedServerMs });
+      }
+    } catch (e) {
+      // ignore individual sample error
+    }
+  }
+
+  if (samples.length === 0) {
+    return { ok: false, error: "Unable to reach TTD server for clock calibration" };
+  }
+
+  samples.sort((a, b) => a.drift - b.drift);
+  const medianSample = samples[Math.floor(samples.length / 2)];
+  return {
+    ok: true,
+    drift: medianSample.drift,
+    rtt: medianSample.rtt,
+    serverTime: medianSample.serverTime,
+    samplesCount: samples.length,
+  };
+}
+
+chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+  if (message.action === "GET_SERVER_TIME") {
+    measureServerDrift().then(sendResponse);
+    return true; // async sendResponse
+  }
+});

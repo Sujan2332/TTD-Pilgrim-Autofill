@@ -26,89 +26,242 @@
           </label>
           <button id="clearAllBtn" class="delete-all-btn" type="button"
             title="Delete all group data"
-            aria-label="Delete all group data">&#128465;</button>
+            aria-label="Delete all group data">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><line x1="10" y1="11" x2="10" y2="17"/><line x1="14" y1="11" x2="14" y2="17"/></svg>
+          </button>
         </div>
       </div>
     </header>
 
+    <nav class="popup-tabs" role="tablist">
+      <button id="tabSevaBtn" class="tab-btn active" role="tab" aria-selected="true" type="button">
+        Seva &amp; Sniper
+      </button>
+      <button id="tabPilgrimsBtn" class="tab-btn" role="tab" aria-selected="false" type="button">
+        Pilgrim Details
+      </button>
+    </nav>
+
     <div id="status" class="status" role="status" aria-live="polite"></div>
 
-    <div class="import-row">
-      <button id="importBtn" class="secondary-btn">Import JSON</button>
-      <button id="exportBtn" class="secondary-btn">Sample JSON</button>
-      <input type="file" id="importFile" accept="application/json" hidden />
+    <!-- TAB 1: SEVA & QUOTA SNIPER -->
+    <div id="tabSevaContent" class="tab-content active">
+      <!-- Target Seva Service Card -->
+      <section class="config-card">
+        <div class="card-title">Target Seva / Service</div>
+        <div class="card-subtitle">Auto-clicks this service tile when drop triggers or on portal homepage</div>
+        <label class="form-label" for="targetSevaSelect">Select Service</label>
+        <select id="targetSevaSelect" class="form-select">
+          <option value="Special Entry Darshan">Special Entry Darshan (₹300)</option>
+          <option value="Arjitha Sevas">Arjitha Sevas</option>
+          <option value="Special Entry Darshan (Ammavari Temple)">Special Entry Darshan (PAT / Ammavari Temple)</option>
+          <option value="Sri Srinivasa Divyanugraha Homam">Sri Srinivasa Divyanugraha Homam</option>
+          <option value="Accommodation">Accommodation</option>
+          <option value="Online Sevas (Virtual Participation)">Online Sevas (Virtual Participation)</option>
+          <option value="Seva E-Dip">Seva E-Dip</option>
+          <option value="Angapradakshinam">Angapradakshinam</option>
+          <option value="Kalyanavedika">Kalyanavedika</option>
+          <option value="none">Manual / Do not auto-click service</option>
+        </select>
+        <div class="form-check-group" style="margin-top: 12px; padding: 7px 10px; background: #fff; border-radius: 6px; border: 1px solid #e7e5e4;">
+          <label class="form-check-label" style="font-weight: 600; color: #1f2937;">
+            <input type="checkbox" id="autoClickTargetSevaCheckbox" />
+            <span>Auto-click target seva on portal load</span>
+          </label>
+        </div>
+      </section>
+
+      <!-- Calendar & Slot Auto-Picker Card -->
+      <section class="config-card">
+        <div class="card-title">Calendar &amp; Slot Auto-Picker</div>
+        <div class="card-subtitle">Instantly picks target date &amp; slot the millisecond calendar opens</div>
+
+        <div class="form-check-group" style="margin-bottom: 12px; padding: 7px 10px; background: #fff; border-radius: 6px; border: 1px solid #e7e5e4;">
+          <label class="form-check-label" style="font-weight: 600; color: #1f2937;">
+            <input type="checkbox" id="autoPickerEnabledCheckbox" checked />
+            <span>Auto-select date and slot</span>
+          </label>
+        </div>
+
+        <div class="form-group">
+          <label class="form-label" for="targetDateField">Target Date (Option A)</label>
+          <input type="date" id="targetDateField" class="form-input" />
+        </div>
+
+        <div class="form-check-group">
+          <label class="form-check-label">
+            <input type="checkbox" id="fallbackGreenDateCheckbox" checked />
+            <span>Fallback to first green date if target date is full</span>
+          </label>
+        </div>
+
+        <div class="form-row-2col">
+          <div class="form-group">
+            <label class="form-label" for="preferredSlotSelect">Preferred Slot</label>
+            <select id="preferredSlotSelect" class="form-select">
+              <option value="any">Any Available (Fastest)</option>
+              <option value="0800">08:00 AM</option>
+              <option value="0900">09:00 AM</option>
+              <option value="1000">10:00 AM</option>
+              <option value="1100">11:00 AM</option>
+              <option value="1200">12:00 PM</option>
+              <option value="1300">01:00 PM</option>
+              <option value="1400">02:00 PM</option>
+              <option value="1500">03:00 PM</option>
+              <option value="1600">04:00 PM</option>
+              <option value="1700">05:00 PM</option>
+              <option value="1800">06:00 PM</option>
+              <option value="1900">07:00 PM</option>
+              <option value="2000">08:00 PM</option>
+              <option value="2100">09:00 PM</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label class="form-label" for="ticketCountSelect">Ticket Count</label>
+            <select id="ticketCountSelect" class="form-select">
+              <option value="auto">Auto (from Pilgrims)</option>
+              <option value="1">1</option>
+              <option value="2">2</option>
+              <option value="3">3</option>
+              <option value="4">4</option>
+              <option value="5">5</option>
+              <option value="6">6</option>
+            </select>
+          </div>
+        </div>
+
+        <div class="form-check-group">
+          <label class="form-check-label">
+            <input type="checkbox" id="autoContinueCalendarCheckbox" checked />
+            <span>Auto-click Continue to enter Pilgrim Details</span>
+          </label>
+        </div>
+      </section>
+
+      <!-- Atomic Clock Sync & Drop Sniper Card -->
+      <section class="config-card sniper-card">
+        <div class="card-header-row">
+          <div class="card-title">Clock Sync &amp; Quota Sniper</div>
+          <label class="toggle-switch-compact" title="Activate Quota Drop Sniper">
+            <input type="checkbox" id="sniperEnabledToggle" />
+            <span class="toggle-slider-compact"></span>
+          </label>
+        </div>
+        <div class="card-subtitle">Synchronizes local clock with TTD servers for atomic-precision drop sniping</div>
+
+        <!-- Clock Sync Bar -->
+        <div class="clock-sync-bar">
+          <div class="clock-display">
+            <span class="clock-label">TTD Clock:</span>
+            <span id="ttdLiveClock" class="clock-time">--:--:--</span>
+          </div>
+          <div class="drift-container">
+            <span id="clockDriftBadge" class="drift-badge uncalibrated">Uncalibrated</span>
+            <button id="syncClockBtn" class="sync-clock-btn" type="button" title="Ping TTD server to calibrate clock drift">Sync</button>
+          </div>
+        </div>
+
+        <!-- Quota Drop Settings -->
+        <div class="form-group" style="margin-top: 10px;">
+          <label class="form-label">Quota Drop Time</label>
+          <div class="time-input-row">
+            <input type="time" step="1" id="sniperDropTimeInput" value="10:00:00" class="form-input" />
+            <div class="time-preset-pills">
+              <button type="button" class="preset-pill" data-time="09:00:00">9 AM</button>
+              <button type="button" class="preset-pill active" data-time="10:00:00">10 AM</button>
+              <button type="button" class="preset-pill" data-time="15:00:00">3 PM</button>
+            </div>
+          </div>
+        </div>
+
+        <div class="form-group">
+          <div class="lead-time-row">
+            <label class="form-label" for="sniperLeadTimeInput">Transit Lead Time (Early fire offset)</label>
+            <div class="lead-time-input-wrap">
+              <input type="number" id="sniperLeadTimeInput" value="250" min="0" max="2000" step="50" class="form-input lead-input" />
+              <span class="lead-unit">ms</span>
+            </div>
+          </div>
+          <div class="field-hint">Triggers ~250ms before drop so network packet arrives right at 10:00:00.000</div>
+        </div>
+
+        <div id="sniperCountdownDisplay" class="sniper-countdown-badge">Sniper idle (Toggle ON to arm)</div>
+      </section>
     </div>
 
-    <div id="groups"></div>
-
-    <button id="addGroupBtn" class="add-group-btn" type="button">+ Add
-      Group</button>
-
-    <footer>
-      <div class="checkboxs_payments_container">
-        <div class="checkboxes">
-          <label class="continue-check">
-            <input type="checkbox" id="clickContinueCheckbox" checked />
-            Also click Continue and Pay Now after autofill
-          </label>
-          <label class="continue-check">
-            <input type="checkbox" id="autoRunCheckbox" checked />
-            Auto-run the moment the pilgrim form loads
-          </label>
-        </div>
-        <div class="payment-methods">
-          <div class="payment-method-title">Payment method</div>
-          <div class="payment-options">
-            <label class="payment-option">
-              <input type="radio" name="paymentMethod" value="upi" checked />
-              UPI / Generate QR
-            </label>
-            <label class="payment-option">
-              <input type="radio" name="paymentMethod" value="card" />
-              Credit / Debit card
-            </label>
-          </div>
-        </div>
+    <!-- TAB 2: PILGRIM DETAILS -->
+    <div id="tabPilgrimsContent" class="tab-content">
+      <div class="import-row">
+        <button id="importBtn" class="secondary-btn">Import JSON</button>
+        <button id="exportBtn" class="secondary-btn">Sample JSON</button>
+        <input type="file" id="importFile" accept="application/json" hidden />
       </div>
 
-      <div id="cardDetailsSection" class="payment-card-details" hidden>
-        <details id="cardDetailsDisclosure" class="card-details-disclosure">
-          <summary>Card Details</summary>
-          <div class="card-details-content">
-            <div class="card-json-actions">
-              <button id="importCardBtn" class="card-json-btn"
-                type="button">Import Card JSON</button>
-              <button id="downloadCardSampleBtn" class="card-json-btn"
-                type="button">Card Sample JSON</button>
-              <input type="file" id="importCardFile" accept="application/json"
-                hidden />
-            </div>
-            <div class="payment-card-row">
-              <label>Card Number
-                <input type="text" data-field="cardNumber" maxlength="24" />
-              </label>
-              <label>Name on Card
-                <input type="text" data-field="cardName" maxlength="50" />
-              </label>
-            </div>
-            <div class="payment-card-row">
-              <label>Expiry (MM/YY)
-                <input type="text" data-field="expiry" maxlength="5" />
-              </label>
-              <label>CVV
-                <input type="password" data-field="cvv" maxlength="4" />
-              </label>
-            </div>
+      <div id="groups"></div>
 
+      <button id="addGroupBtn" class="add-group-btn" type="button">+ Add Group</button>
+
+      <footer>
+        <div class="checkboxs_payments_container">
+          <div class="checkboxes">
+            <label class="continue-check">
+              <input type="checkbox" id="clickContinueCheckbox" checked />
+              Also click Continue and Pay Now after autofill
+            </label>
+            <label class="continue-check">
+              <input type="checkbox" id="autoRunCheckbox" checked />
+              Auto-run the moment the pilgrim form loads
+            </label>
           </div>
-        </details>
-      </div>
-      <div id="selectionCount" class="selection-count"></div>
-      <button id="autofillBtn" class="primary-btn">Autofill Selected
-        Pilgrims</button>
-      <div class="hint">Select pilgrims above, then click Autofill or press
-        <span class="shortcut-key">Ctrl+Shift+Y</span> on the TTD page.</div>
-    </footer>
+          <div class="payment-methods">
+            <div class="payment-method-title">Payment method</div>
+            <div class="payment-options">
+              <label class="payment-option">
+                <input type="radio" name="paymentMethod" value="upi" checked />
+                UPI / Generate QR
+              </label>
+              <label class="payment-option">
+                <input type="radio" name="paymentMethod" value="card" />
+                Credit / Debit card
+              </label>
+            </div>
+          </div>
+        </div>
+
+        <div id="cardDetailsSection" class="payment-card-details" hidden>
+          <details id="cardDetailsDisclosure" class="card-details-disclosure">
+            <summary>Card Details</summary>
+            <div class="card-details-content">
+              <div class="card-json-actions">
+                <button id="importCardBtn" class="card-json-btn" type="button">Import Card JSON</button>
+                <button id="downloadCardSampleBtn" class="card-json-btn" type="button">Card Sample JSON</button>
+                <input type="file" id="importCardFile" accept="application/json" hidden />
+              </div>
+              <div class="payment-card-row">
+                <label>Card Number
+                  <input type="text" data-field="cardNumber" maxlength="24" />
+                </label>
+                <label>Name on Card
+                  <input type="text" data-field="cardName" maxlength="50" />
+                </label>
+              </div>
+              <div class="payment-card-row">
+                <label>Expiry (MM/YY)
+                  <input type="text" data-field="expiry" maxlength="5" />
+                </label>
+                <label>CVV
+                  <input type="password" data-field="cvv" maxlength="4" />
+                </label>
+              </div>
+            </div>
+          </details>
+        </div>
+        <div id="selectionCount" class="selection-count"></div>
+        <button id="autofillBtn" class="primary-btn">Autofill Selected Pilgrims</button>
+        <div class="hint">Select pilgrims above, then click Autofill or press
+          <span class="shortcut-key">Ctrl+Shift+Y</span> on the TTD page.</div>
+      </footer>
+    </div>
 
     <template id="group-template">
       <section class="group">
@@ -122,7 +275,9 @@
             </label>
             <button class="delete-group-btn" type="button"
               title="Delete this group"
-              aria-label="Delete this group">&#128465;</button>
+              aria-label="Delete this group">
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><line x1="10" y1="11" x2="10" y2="17"/><line x1="14" y1="11" x2="14" y2="17"/></svg>
+            </button>
             <button class="toggle-btn" type="button">
               <span>General Details</span><span class="details-chevron"
                 aria-hidden="true">▾</span>
