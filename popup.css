@@ -420,6 +420,25 @@ header h1 {
   min-width: 0;
 }
 
+/* Field validation (popup.js validatePilgrim) */
+.pilgrim-fields .invalid,
+.pilgrim-fields .invalid:focus {
+  border-color: #dc2626;
+  background: #fef2f2;
+}
+
+.pilgrim-error {
+  grid-column: 1 / -1;
+  font-size: 10.5px;
+  line-height: 1.3;
+  color: #b91c1c;
+  text-align: center;
+}
+
+.pilgrim-error[hidden] {
+  display: none;
+}
+
 footer {
   position: sticky;
   bottom: 0;

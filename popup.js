@@ -271,9 +271,116 @@ async function sendAutofillMessage(tab, message) {
   return response;
 }
 
+// ---------------------------------------------------------------------------
+// Pilgrim field validation. TTD rejects bad details mid-booking (often during a quota drop), so catch
+// them here: errors show live under each row, and Autofill refuses to run for selected pilgrims with errors.
+// ---------------------------------------------------------------------------
+
+// Verhoeff checksum - the check digit scheme of every Aadhaar number (catches single-digit typos and
+// most swapped neighbouring digits)
+const VERHOEFF_D = [
+  [0, 1, 2, 3, 4, 5, 6, 7, 8, 9], [1, 2, 3, 4, 0, 6, 7, 8, 9, 5], [2, 3, 4, 0, 1, 7, 8, 9, 5, 6],
+  [3, 4, 0, 1, 2, 8, 9, 5, 6, 7], [4, 0, 1, 2, 3, 9, 5, 6, 7, 8], [5, 9, 8, 7, 6, 0, 4, 3, 2, 1],
+  [6, 5, 9, 8, 7, 1, 0, 4, 3, 2], [7, 6, 5, 9, 8, 2, 1, 0, 4, 3], [8, 7, 6, 5, 9, 3, 2, 1, 0, 4],
+  [9, 8, 7, 6, 5, 4, 3, 2, 1, 0],
+];
+const VERHOEFF_P = [
+  [0, 1, 2, 3, 4, 5, 6, 7, 8, 9], [1, 5, 7, 6, 2, 8, 3, 0, 9, 4], [5, 8, 0, 3, 7, 9, 6, 1, 4, 2],
+  [8, 9, 1, 6, 0, 4, 3, 5, 2, 7], [9, 4, 5, 3, 1, 2, 6, 8, 7, 0], [4, 2, 8, 6, 5, 7, 3, 9, 0, 1],
+  [2, 7, 9, 3, 8, 0, 6, 4, 1, 5], [7, 0, 4, 6, 9, 1, 3, 2, 5, 8],
+];
+
+function isVerhoeffValid(digits) {
+  let c = 0;
+  digits.split("").reverse().forEach((ch, i) => {
+    c = VERHOEFF_D[c][VERHOEFF_P[i % 8][Number(ch)]];
+  });
+  return c === 0;
+}
+
+// Normalized ID number used for checks and duplicate detection
+function normalizeIdNumber(idType, idNumber) {
+  const raw = String(idNumber || "").trim();
+  return idType === "Aadhaar Card" ? raw.replace(/[\s-]/g, "") : raw.replace(/\s/g, "").toUpperCase();
+}
+
+function idNumberError(idType, idNumber) {
+  const id = normalizeIdNumber(idType, idNumber);
+  if (!id) return "ID number is required";
+  if (idType === "Aadhaar Card") {
+    if (!/^\d+$/.test(id)) return "Aadhaar must contain digits only";
+    if (id.length !== 12) return `Aadhaar must be 12 digits (has ${id.length})`;
+    if (/^[01]/.test(id)) return "Aadhaar can't start with 0 or 1";
+    if (!isVerhoeffValid(id)) return "Aadhaar number is invalid - check for a mistyped digit";
+  } else if (idType === "Passport") {
+    if (!/^[A-Z][0-9]{7}$/.test(id)) return "Passport must be 1 letter + 7 digits (e.g. A1234567)";
+  }
+  return null;
+}
+
+// { field: message } for one pilgrim. Untouched, unselected rows are not checked.
+function validatePilgrim(p) {
+  const filled = ["name", "age", "gender", "idType", "idNumber"].some((f) => String(p[f] || "").trim());
+  if (!filled && !p.selected) return {};
+  const errors = {};
+  const name = String(p.name || "").trim();
+  if (!name) errors.name = "Name is required";
+  else if (!/^[A-Za-z][A-Za-z .]*$/.test(name)) errors.name = "Name: letters, spaces and dots only";
+  else if (name.replace(/[^A-Za-z]/g, "").length < 2) errors.name = "Name is too short";
+  const ageText = String(p.age || "").trim();
+  const age = Number(ageText);
+  if (!ageText) errors.age = "Age is required";
+  else if (!/^\d+$/.test(ageText) || age < 1 || age > 120) errors.age = "Age must be 1-120";
+  if (!p.gender) errors.gender = "Select gender";
+  if (!p.idType) errors.idType = "Select photo ID type";
+  else {
+    const idErr = idNumberError(p.idType, p.idNumber);
+    if (idErr) errors.idNumber = idErr;
+  }
+  return errors;
+}
+
+// Errors for every pilgrim, as a Map pilgrim -> { field: message }, including duplicate IDs across groups
+function validateAllPilgrims(groups) {
+  const all = groups.flatMap((g) => g.pilgrims);
+  const results = new Map(all.map((p) => [p, validatePilgrim(p)]));
+  const byId = new Map();
+  all.forEach((p) => {
+    if (results.get(p).idNumber || !p.idType) return;
+    const key = `${p.idType}|${normalizeIdNumber(p.idType, p.idNumber)}`;
+    if (!normalizeIdNumber(p.idType, p.idNumber)) return;
+    byId.set(key, [...(byId.get(key) || []), p]);
+  });
+  byId.forEach((list) => {
+    if (list.length > 1) list.forEach((p) => { results.get(p).idNumber = "Same ID number used for another pilgrim"; });
+  });
+  return results;
+}
+
+// Rows currently on screen, so validation can repaint without a full re-render
+let pilgrimRowRefs = [];
+
+function refreshPilgrimValidation(groups) {
+  const results = validateAllPilgrims(groups);
+  pilgrimRowRefs.forEach(({ pilgrim, row }) => {
+    const errors = results.get(pilgrim) || {};
+    row.querySelectorAll("[data-field]").forEach((el) => {
+      const msg = errors[el.dataset.field];
+      el.classList.toggle("invalid", !!msg);
+      el.title = msg || "";
+    });
+    const box = row.querySelector(".pilgrim-error");
+    const messages = Object.values(errors);
+    box.textContent = messages.join(" · ");
+    box.hidden = messages.length === 0;
+  });
+  return results;
+}
+
 function render(groups) {
   const container = document.getElementById("groups");
   container.innerHTML = "";
+  pilgrimRowRefs = [];
   const groupTpl = document.getElementById("group-template");
   const pilgrimTpl = document.getElementById("pilgrim-template");
 
@@ -353,6 +460,7 @@ function render(groups) {
         saveData(groups);
         updateSelectionCount(groups);
         updateSelectionToggles(groups);
+        refreshPilgrimValidation(groups);
       });
 
       pNode.querySelectorAll("[data-field]").forEach((input) => {
@@ -362,14 +470,17 @@ function render(groups) {
           pilgrim[field] = input.value;
           saveData(groups);
           updateExportButton(groups);
+          refreshPilgrimValidation(groups);
         });
         input.addEventListener("change", () => {
           pilgrim[field] = input.value;
           saveData(groups);
           updateExportButton(groups);
+          refreshPilgrimValidation(groups);
         });
       });
 
+      pilgrimRowRefs.push({ pilgrim, row });
       pilgrimsDiv.appendChild(pNode);
     });
 
@@ -379,6 +490,7 @@ function render(groups) {
   updateSelectionCount(groups);
   updateSelectionToggles(groups);
   updateExportButton(groups);
+  refreshPilgrimValidation(groups);
 }
 
 function handleAddGroup() {
@@ -457,6 +569,20 @@ async function handleAutofill() {
 
   if (selected.length === 0) {
     setStatus("Select at least one pilgrim before starting autofill.", true);
+    return;
+  }
+
+  // TTD would reject bad details anyway - stop here, where they're quick to fix
+  // (freshly loaded objects - validate only; the on-screen rows already show their errors live)
+  const results = validateAllPilgrims(groups);
+  const invalid = selected.filter(({ pilgrim }) => Object.keys(results.get(pilgrim) || {}).length > 0);
+  if (invalid.length > 0) {
+    const first = invalid[0].pilgrim;
+    const firstMsg = Object.values(results.get(first))[0];
+    setStatus(
+      `Fix ${invalid.length} pilgrim(s) before autofill - ${first.name.trim() || "a pilgrim"}: ${firstMsg}.`,
+      true
+    );
     return;
   }
 
