@@ -343,10 +343,8 @@
     }
 
     function getTicketMenuOptions() {
-      // 1. Direct floating dropdown items that are numeric
-      let direct = Array.from(
-        document.querySelectorAll('.floatingDropdown_listItem__tU_5x, [class*="floatingDropdown_listItem"], [class*="listItem"]')
-      ).filter(el => {
+      // 1. Dropdown list items that are numeric
+      let direct = Array.from(document.querySelectorAll('[class*="listItem"]')).filter(el => {
         const t = el.textContent?.trim();
         const n = parseInt(t, 10);
         return !isNaN(n) && n >= 1 && n <= 10 && (t === String(n) || t === String(n).padStart(2, '0'));
@@ -677,7 +675,6 @@
     if (!continueBtn) {
       console.warn('[TTD Bridge] Continue button not found or remained disabled');
       continueInFlight = false;
-      window.dispatchEvent(new CustomEvent('__TTD_CONTINUE_CLICKED__', { detail: { success: false } }));
       return false;
     }
 
@@ -702,7 +699,6 @@
       continueInFlight = false;
     }, 2500);
 
-    window.dispatchEvent(new CustomEvent('__TTD_CONTINUE_CLICKED__', { detail: { success: true } }));
     return true;
   }
 

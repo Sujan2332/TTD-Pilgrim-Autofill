@@ -279,7 +279,6 @@ function render(groups) {
 
   groups.forEach((group, gi) => {
     const node = groupTpl.content.cloneNode(true);
-    const section = node.querySelector(".group");
     const nameInput = node.querySelector(".group-name");
     const toggleBtn = node.querySelector(".toggle-btn");
     const detailsChevron = node.querySelector(".details-chevron");
