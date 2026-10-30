@@ -586,17 +586,6 @@ footer {
   border-color: #fb923c;
 }
 
-.selection-count {
-  font-size: 11px;
-  color: #78716c;
-  text-align: center;
-  margin-bottom: 6px;
-}
-
-.selection-count strong {
-  color: #9a3412;
-}
-
 .primary-btn {
   width: 100%;
   padding: 11px;
@@ -711,6 +700,12 @@ body.is-resizing-popup {
   animation: fadeIn 0.15s ease-in-out;
 }
 
+/* The last card's margin-bottom is dropped at the end of the scroll area, leaving the
+   Quota Sniper card flush with the popup's bottom edge - padding keeps a real gap */
+#tabSevaContent {
+  padding-bottom: 3px;
+}
+
 @keyframes fadeIn {
   from { opacity: 0; transform: translateY(2px); }
   to { opacity: 1; transform: translateY(0); }
@@ -729,6 +724,24 @@ body.is-resizing-popup {
 .config-card.sniper-card {
   border-color: #fed7aa;
   background: linear-gradient(180deg, #fffbeb 0%, #ffffff 40%);
+}
+
+.config-card.master-toggle-card {
+  border-color: #fdba74;
+}
+
+#sevaSniperSettings.disabled {
+  opacity: 0.5;
+}
+
+.auto-pick-specific.disabled {
+  opacity: 0.45;
+  pointer-events: none;
+}
+
+#sniperCard.disabled {
+  opacity: 0.45;
+  pointer-events: none;
 }
 
 .card-header-row {
@@ -1034,4 +1047,4 @@ body.is-resizing-popup {
   flex-direction: column;
   gap: 7px;
   margin-top: 10px;
-}
+}

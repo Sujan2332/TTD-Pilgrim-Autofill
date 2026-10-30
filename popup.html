@@ -34,10 +34,10 @@
     </header>
 
     <nav class="popup-tabs" role="tablist">
-      <button id="tabSevaBtn" class="tab-btn active" role="tab" aria-selected="true" type="button">
+      <button id="tabSevaBtn" class="tab-btn" role="tab" aria-selected="false" type="button">
         Seva &amp; Sniper
       </button>
-      <button id="tabPilgrimsBtn" class="tab-btn" role="tab" aria-selected="false" type="button">
+      <button id="tabPilgrimsBtn" class="tab-btn active" role="tab" aria-selected="true" type="button">
         Pilgrim Details
       </button>
     </nav>
@@ -45,7 +45,20 @@
     <div id="status" class="status" role="status" aria-live="polite"></div>
 
     <!-- TAB 1: SEVA & QUOTA SNIPER -->
-    <div id="tabSevaContent" class="tab-content active">
+    <div id="tabSevaContent" class="tab-content">
+      <!-- Master Seva & Sniper Toggle -->
+      <section class="config-card master-toggle-card">
+        <div class="card-header-row">
+          <div class="card-title">Enable Seva &amp; Sniper Automation</div>
+          <label class="toggle-switch-compact" title="Master switch for seva auto-click, calendar auto-picker and quota sniper">
+            <input type="checkbox" id="sevaSniperEnabledToggle" />
+            <span class="toggle-slider-compact"></span>
+          </label>
+        </div>
+        <div class="card-subtitle" style="margin-bottom: 0;">When OFF, nothing on this tab triggers automatically</div>
+      </section>
+
+      <div id="sevaSniperSettings">
       <!-- Target Seva Service Card -->
       <section class="config-card">
         <div class="card-title">Target Seva / Service</div>
@@ -63,32 +76,63 @@
           <option value="Kalyanavedika">Kalyanavedika</option>
           <option value="none">Manual / Do not auto-click service</option>
         </select>
-        <div class="form-check-group" style="margin-top: 12px; padding: 7px 10px; background: #fff; border-radius: 6px; border: 1px solid #e7e5e4;">
-          <label class="form-check-label" style="font-weight: 600; color: #1f2937;">
-            <input type="checkbox" id="autoClickTargetSevaCheckbox" />
-            <span>Auto-click target seva on portal load</span>
-          </label>
+        <!-- Arjitha Seva Temple Selector (Visible only when Arjitha Sevas is selected) -->
+        <div id="arjithaTempleGroup" style="display: none; margin-top: 10px;">
+          <label class="form-label" for="arjithaTempleSelect">Select Temple</label>
+          <select id="arjithaTempleSelect" class="form-select">
+            <option value="Srivari Temple - Tirumala">Srivari Temple - Tirumala</option>
+            <option value="Sapthagiri Gau Pradakshina Shala - Tirupati">Sapthagiri Gau Pradakshina Shala - Tirupati</option>
+            <option value="Sri Govindarajaswamy Temple - Tirupathi">Sri Govindarajaswamy Temple - Tirupathi</option>
+            <option value="Sri Padmavathi Ammavari Temple - Tiruchanoor">Sri Padmavathi Ammavari Temple - Tiruchanoor</option>
+            <option value="Sri KalyanaVenkateswaraSwamy Temple - Srinivasamangapuram">Sri KalyanaVenkateswaraSwamy Temple - Srinivasamangapuram</option>
+            <option value="Sri Prasanna Venkateswara Swamy Temple - Appalayagunta">Sri Prasanna Venkateswara Swamy Temple - Appalayagunta</option>
+            <option value="Surya Narayana Swamy Temple - Tiruchanoor">Surya Narayana Swamy Temple - Tiruchanoor</option>
+            <option value="Srinivasa Temple - Tiruchanoor">Srinivasa Temple - Tiruchanoor</option>
+            <option value="Sri Kalyana Venkateswara Swamy Temple - Narayanavanam">Sri Kalyana Venkateswara Swamy Temple - Narayanavanam</option>
+            <option value="Sri KodandaRamaSwamy Temple - Vontimitta">Sri KodandaRamaSwamy Temple - Vontimitta</option>
+            <option value="Sri Kodanda Rama Swamy Temple - Tirupathi">Sri Kodanda Rama Swamy Temple - Tirupathi</option>
+            <option value="Sri Chennakeshava Swamy Temple - Thallapaka">Sri Chennakeshava Swamy Temple - Thallapaka</option>
+            <option value="Sri Venugopala Swamy Temple - Karvetinagaram">Sri Venugopala Swamy Temple - Karvetinagaram</option>
+          </select>
+
+          <!-- Arjitha Specific Seva Selector (reveals dynamically for selected temple) -->
+          <div id="arjithaSevaGroup" style="margin-top: 10px;">
+            <label class="form-label" for="arjithaSevaSelect">Select Seva</label>
+            <select id="arjithaSevaSelect" class="form-select">
+              <option value="any">Any Available (Fastest)</option>
+            </select>
+          </div>
+
+          <!-- What to do when the chosen seva isn't offered on the date (hidden for "Any Available") -->
+          <div id="arjithaFallbackGroup" style="margin-top: 10px;">
+            <label class="form-label" for="arjithaFallbackSelect">If this seva isn't available</label>
+            <select id="arjithaFallbackSelect" class="form-select">
+              <option value="ask">Ask me to choose</option>
+              <option value="samePrice">Auto-pick a same-price seva, else ask me</option>
+              <option value="samePriceThenAny">Auto-pick a same-price seva, else any seva</option>
+              <option value="any">Auto-pick any available seva</option>
+            </select>
+          </div>
         </div>
       </section>
 
       <!-- Calendar & Slot Auto-Picker Card -->
       <section class="config-card">
-        <div class="card-title">Calendar &amp; Slot Auto-Picker</div>
-        <div class="card-subtitle">Instantly picks target date &amp; slot the millisecond calendar opens</div>
-
-        <div class="form-check-group" style="margin-bottom: 12px; padding: 7px 10px; background: #fff; border-radius: 6px; border: 1px solid #e7e5e4;">
-          <label class="form-check-label" style="font-weight: 600; color: #1f2937;">
+        <div class="card-header-row">
+          <div class="card-title">Calendar &amp; Slot Auto-Picker</div>
+          <label class="toggle-switch-compact" title="Auto-select date and slot: pick the first available date &amp; slot">
             <input type="checkbox" id="autoPickerEnabledCheckbox" checked />
-            <span>Auto-select date and slot</span>
+            <span class="toggle-slider-compact"></span>
           </label>
         </div>
+        <div id="autoPickerSubtitle" class="card-subtitle">ON: picks the first available date &amp; slot instantly. <br/> OFF: uses the target date &amp; preferred slot below.</div>
 
-        <div class="form-group">
+        <div class="form-group auto-pick-specific">
           <label class="form-label" for="targetDateField">Target Date (Option A)</label>
           <input type="date" id="targetDateField" class="form-input" />
         </div>
 
-        <div class="form-check-group">
+        <div class="form-check-group auto-pick-specific">
           <label class="form-check-label">
             <input type="checkbox" id="fallbackGreenDateCheckbox" checked />
             <span>Fallback to first green date if target date is full</span>
@@ -96,7 +140,7 @@
         </div>
 
         <div class="form-row-2col">
-          <div class="form-group">
+          <div class="form-group auto-pick-specific">
             <label class="form-label" for="preferredSlotSelect">Preferred Slot</label>
             <select id="preferredSlotSelect" class="form-select">
               <option value="any">Any Available (Fastest)</option>
@@ -117,7 +161,7 @@
             </select>
           </div>
           <div class="form-group">
-            <label class="form-label" for="ticketCountSelect">Ticket Count</label>
+            <label class="form-label" for="ticketCountSelect" title="Number of pilgrims. Sevas that admit several persons per ticket get fewer tickets (e.g. 2 pilgrims on a 2-person seva = 1 ticket).">No. of Pilgrims</label>
             <select id="ticketCountSelect" class="form-select">
               <option value="auto">Auto (from Pilgrims)</option>
               <option value="1">1</option>
@@ -130,7 +174,7 @@
           </div>
         </div>
 
-        <div class="form-check-group">
+        <div class="form-check-group" style="display:none;">
           <label class="form-check-label">
             <input type="checkbox" id="autoContinueCalendarCheckbox" checked />
             <span>Auto-click Continue to enter Pilgrim Details</span>
@@ -138,8 +182,17 @@
         </div>
       </section>
 
+      <!-- On-load click vs. Quota Sniper (mutually exclusive) -->
+      <div class="form-check-group" style="margin-bottom: 12px; padding: 7px 10px; background: #fff; border-radius: 6px; border: 1px solid #e7e5e4;">
+        <label class="form-check-label" style="font-weight: 600; color: #1f2937;">
+          <input type="checkbox" id="autoClickTargetSevaCheckbox" checked />
+          <span>Click Pilgrim Service as soon as page loads</span>
+        </label>
+        <div class="field-hint">When ticked, the Quota Sniper below is disabled. Untick to click the service at drop time instead.</div>
+      </div>
+
       <!-- Atomic Clock Sync & Drop Sniper Card -->
-      <section class="config-card sniper-card">
+      <section id="sniperCard" class="config-card sniper-card">
         <div class="card-header-row">
           <div class="card-title">Clock Sync &amp; Quota Sniper</div>
           <label class="toggle-switch-compact" title="Activate Quota Drop Sniper">
@@ -187,10 +240,11 @@
 
         <div id="sniperCountdownDisplay" class="sniper-countdown-badge">Sniper idle (Toggle ON to arm)</div>
       </section>
+      </div>
     </div>
 
     <!-- TAB 2: PILGRIM DETAILS -->
-    <div id="tabPilgrimsContent" class="tab-content">
+    <div id="tabPilgrimsContent" class="tab-content active">
       <div class="import-row">
         <button id="importBtn" class="secondary-btn">Import JSON</button>
         <button id="exportBtn" class="secondary-btn">Sample JSON</button>
@@ -256,7 +310,6 @@
             </div>
           </details>
         </div>
-        <div id="selectionCount" class="selection-count"></div>
         <button id="autofillBtn" class="primary-btn">Autofill Selected Pilgrims</button>
         <div class="hint">Select pilgrims above, then click Autofill or press
           <span class="shortcut-key">Ctrl+Shift+Y</span> on the TTD page.</div>

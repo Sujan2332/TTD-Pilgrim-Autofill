@@ -430,14 +430,16 @@ async function handleClearAll() {
   setStatus("All group data cleared. Three empty groups are ready.");
 }
 
+// The selected-pilgrim count is shown in the Autofill button itself, e.g. "Autofill Selected 2 Pilgrims"
 function updateSelectionCount(groups) {
-  const el = document.getElementById("selectionCount");
-  if (!el) return;
+  const btn = document.getElementById("autofillBtn");
+  if (!btn) return;
   const count = groups.reduce(
     (sum, g) => sum + g.pilgrims.filter((p) => p.selected && p.name.trim()).length,
     0
   );
-  el.innerHTML = count === 0 ? "No pilgrims selected" : `<strong>${count}</strong> pilgrim(s) selected`;
+  btn.textContent =
+    count === 0 ? "Autofill Selected Pilgrims" : `Autofill Selected ${count} ${count === 1 ? "Pilgrim" : "Pilgrims"}`;
 }
 
 async function handleAutofill() {
@@ -586,20 +588,155 @@ async function handleExport() {
   setStatus("JSON downloaded successfully. It is ready to reuse or share.");
 }
 
+const TEMPLE_SEVAS_MAP = {
+  "Srivari Temple - Tirumala": [
+    "Kalyanotsavam",
+    "Arjitha Brahmotsavam",
+    "Sahasra Deepalankara Seva",
+    "Unjal Seva",
+    "Vasantotsavam",
+    "Jyestabhishekam",
+    "Pavithrotsavam",
+    "Pushpayagam"
+  ],
+  "Sapthagiri Gau Pradakshina Shala - Tirupati": [
+    "Sri Srinivasa Divyaanugraha Homam"
+  ],
+  "Sri Govindarajaswamy Temple - Tirupathi": [
+    "Kumkumarchana",
+    "Unjal Seva",
+    "Veda Ashirvachanam",
+    "Pavithrotsavam"
+  ],
+  "Sri Padmavathi Ammavari Temple - Tiruchanoor": [
+    "Kalyanotsavam",
+    "Lakshmi Puja",
+    "Abhishekam",
+    "Vastralankara Seva",
+    "Suprabhatham"
+  ],
+  "Sri KalyanaVenkateswaraSwamy Temple - Srinivasamangapuram": [
+    "Kalyanotsavam",
+    "Abhishekam to Moolavaru",
+    "Vasthralankara Seva",
+    "Veda Ashirvachanam",
+    "Kalyana Kankanam",
+    "Thiruppavada"
+  ],
+  "Sri Prasanna Venkateswara Swamy Temple - Appalayagunta": [
+    "Abhishekam",
+    "Vastralankarana Seva"
+  ],
+  "Surya Narayana Swamy Temple - Tiruchanoor": [
+    "Abhishekam to Moolavarlu"
+  ],
+  "Srinivasa Temple - Tiruchanoor": [
+    "Abhishekam to Moolavarlu"
+  ],
+  "Sri Kalyana Venkateswara Swamy Temple - Narayanavanam": [
+    "Kalyanotsavam",
+    "Abhishekam to Sri Kalyana Venkateswara Swamy Varu",
+    "Abhishekam to Sri Padmavathi Ammavaru"
+  ],
+  "Sri KodandaRamaSwamy Temple - Vontimitta": [
+    "Kalyanotsavam on Pournami day"
+  ],
+  "Sri Kodanda Rama Swamy Temple - Tirupathi": [
+    "Ashtothara SathaKalasabhisekham"
+  ],
+  "Sri Chennakeshava Swamy Temple - Thallapaka": [],
+  "Sri Venugopala Swamy Temple - Karvetinagaram": []
+};
+
+// The fallback only matters when a specific seva is chosen
+function updateArjithaFallbackVisibility() {
+  const group = document.getElementById("arjithaFallbackGroup");
+  if (!group) return;
+  const seva = document.getElementById("arjithaSevaSelect")?.value || "any";
+  group.style.display = seva === "any" ? "none" : "block";
+}
+
+function populateArjithaSevas(selectedTemple, selectedSeva = "any") {
+  const sevaSelect = document.getElementById("arjithaSevaSelect");
+  if (!sevaSelect) return;
+
+  const sevas = TEMPLE_SEVAS_MAP[selectedTemple] || [];
+  sevaSelect.innerHTML = '<option value="any">Any Available (Fastest)</option>';
+
+  sevas.forEach((seva) => {
+    const opt = document.createElement("option");
+    opt.value = seva;
+    opt.textContent = seva;
+    if (seva === selectedSeva) {
+      opt.selected = true;
+    }
+    sevaSelect.appendChild(opt);
+  });
+
+  if (selectedSeva && selectedSeva !== "any" && sevas.includes(selectedSeva)) {
+    sevaSelect.value = selectedSeva;
+  } else {
+    sevaSelect.value = "any";
+  }
+  updateArjithaFallbackVisibility();
+}
+
 function getDefaultSniperConfig() {
   return {
+    sevaSniperEnabled: false,
     targetSeva: "Special Entry Darshan",
-    autoClickTargetSeva: false,
+    arjithaTemple: "Srivari Temple - Tirumala",
+    arjithaSeva: "any",
+    arjithaFallback: "ask",
+    autoClickTargetSeva: true,
     autoPickerEnabled: true,
     targetDate: "",
     fallbackGreenDate: true,
     preferredSlot: "any",
-    ticketCount: "auto",
+    ticketCount: "5", // services allow up to 6 pilgrims; Arjitha Sevas caps this to 2
     autoContinueCalendar: true,
     sniperEnabled: false,
     dropTime: "10:00:00",
     leadTimeMs: 250,
   };
+}
+
+// Arjitha Seva bookings allow at most 2 pilgrims; every other service allows up to 6, defaulting to 5
+const ARJITHA_MAX_PILGRIMS = 2;
+const DEFAULT_PILGRIMS_UP_TO_6 = "5";
+let pilgrimLimitWasArjitha = null; // null until the first call (popup load)
+
+function updatePilgrimCountLimit() {
+  const select = document.getElementById("ticketCountSelect");
+  if (!select) return;
+  const isArjitha = (document.getElementById("targetSevaSelect")?.value || "") === "Arjitha Sevas";
+  Array.from(select.options).forEach((opt) => {
+    const tooMany = isArjitha && opt.value !== "auto" && parseInt(opt.value, 10) > ARJITHA_MAX_PILGRIMS;
+    opt.hidden = tooMany;
+    opt.disabled = tooMany;
+  });
+  if (isArjitha && parseInt(select.value, 10) > ARJITHA_MAX_PILGRIMS) {
+    select.value = String(ARJITHA_MAX_PILGRIMS);
+  } else if (!isArjitha && pilgrimLimitWasArjitha === true) {
+    // Leaving Arjitha (max 2) for a service that allows 6: start from the default of 5
+    select.value = DEFAULT_PILGRIMS_UP_TO_6;
+  }
+  pilgrimLimitWasArjitha = isArjitha;
+}
+
+function updateArjithaTempleVisibility() {
+  updatePilgrimCountLimit();
+  const targetSeva = document.getElementById("targetSevaSelect")?.value || "";
+  const group = document.getElementById("arjithaTempleGroup");
+  if (group) {
+    const isArjitha = targetSeva === "Arjitha Sevas";
+    group.style.display = isArjitha ? "block" : "none";
+    if (isArjitha) {
+      const curTemple = document.getElementById("arjithaTempleSelect")?.value || "Srivari Temple - Tirumala";
+      const curSeva = document.getElementById("arjithaSevaSelect")?.value || "any";
+      populateArjithaSevas(curTemple, curSeva);
+    }
+  }
 }
 
 async function loadSniperConfig() {
@@ -612,7 +749,11 @@ async function loadSniperConfig() {
 
 function getSniperConfigFromInputs() {
   return {
+    sevaSniperEnabled: !!document.getElementById("sevaSniperEnabledToggle")?.checked,
     targetSeva: document.getElementById("targetSevaSelect")?.value || "Special Entry Darshan",
+    arjithaTemple: document.getElementById("arjithaTempleSelect")?.value || "Srivari Temple - Tirumala",
+    arjithaSeva: document.getElementById("arjithaSevaSelect")?.value || "any",
+    arjithaFallback: document.getElementById("arjithaFallbackSelect")?.value || "ask",
     autoClickTargetSeva: !!document.getElementById("autoClickTargetSevaCheckbox")?.checked,
     autoPickerEnabled: !!document.getElementById("autoPickerEnabledCheckbox")?.checked,
     targetDate: document.getElementById("targetDateField")?.value || "",
@@ -626,13 +767,49 @@ function getSniperConfigFromInputs() {
   };
 }
 
+function updateSevaSniperSettingsState() {
+  const enabled = !!document.getElementById("sevaSniperEnabledToggle")?.checked;
+  document.getElementById("sevaSniperSettings")?.classList.toggle("disabled", !enabled);
+
+  // On-load click and Quota Sniper are mutually exclusive
+  const clickOnLoad = !!document.getElementById("autoClickTargetSevaCheckbox")?.checked;
+  // Auto-select ON picks the first available date & slot, so the specific date/slot settings don't apply
+  const pickAny = !!document.getElementById("autoPickerEnabledCheckbox")?.checked;
+  document.querySelectorAll(".auto-pick-specific").forEach((group) => {
+    group.classList.toggle("disabled", pickAny);
+    group.querySelectorAll("input, select").forEach((el) => {
+      el.disabled = pickAny;
+    });
+  });
+
+  const sniperCard = document.getElementById("sniperCard");
+  sniperCard?.classList.toggle("disabled", clickOnLoad);
+  sniperCard?.querySelectorAll("input, button").forEach((el) => {
+    el.disabled = clickOnLoad;
+  });
+}
+
 function applySniperConfigToInputs(config) {
+  if (document.getElementById("sevaSniperEnabledToggle")) {
+    document.getElementById("sevaSniperEnabledToggle").checked = !!config.sevaSniperEnabled;
+  }
+  updateSevaSniperSettingsState();
   if (document.getElementById("targetSevaSelect")) {
     document.getElementById("targetSevaSelect").value = config.targetSeva || "Special Entry Darshan";
   }
+  if (document.getElementById("arjithaTempleSelect")) {
+    document.getElementById("arjithaTempleSelect").value = config.arjithaTemple || "Srivari Temple - Tirumala";
+  }
+  populateArjithaSevas(config.arjithaTemple || "Srivari Temple - Tirumala", config.arjithaSeva || "any");
+  updateArjithaTempleVisibility();
+  if (document.getElementById("arjithaFallbackSelect")) {
+    document.getElementById("arjithaFallbackSelect").value = config.arjithaFallback || "ask";
+  }
+  updateArjithaFallbackVisibility();
   if (document.getElementById("autoClickTargetSevaCheckbox")) {
     document.getElementById("autoClickTargetSevaCheckbox").checked = !!config.autoClickTargetSeva;
   }
+  updateSevaSniperSettingsState();
   if (document.getElementById("autoPickerEnabledCheckbox")) {
     document.getElementById("autoPickerEnabledCheckbox").checked = config.autoPickerEnabled !== false;
   }
@@ -650,6 +827,7 @@ function applySniperConfigToInputs(config) {
   }
   if (document.getElementById("ticketCountSelect")) {
     document.getElementById("ticketCountSelect").value = config.ticketCount || "auto";
+    updatePilgrimCountLimit(); // e.g. a saved 4 becomes 2 when Arjitha Sevas is selected
   }
   if (document.getElementById("autoContinueCalendarCheckbox")) {
     document.getElementById("autoContinueCalendarCheckbox").checked = config.autoContinueCalendar !== false;
@@ -663,6 +841,7 @@ function applySniperConfigToInputs(config) {
   if (document.getElementById("sniperLeadTimeInput")) {
     document.getElementById("sniperLeadTimeInput").value = config.leadTimeMs ?? 250;
   }
+  updateSevaSniperSettingsState(); // all inputs are filled now - refresh the enabled/disabled groups
 }
 
 function initTabs(initialTab) {
@@ -693,7 +872,7 @@ function initTabs(initialTab) {
   tabSevaBtn?.addEventListener("click", () => switchTab("seva"));
   tabPilgrimsBtn?.addEventListener("click", () => switchTab("pilgrims"));
 
-  switchTab(initialTab || "seva");
+  switchTab(initialTab || "pilgrims");
 }
 
 let currentDriftMs = 0;
@@ -719,7 +898,20 @@ function updateCountdownDisplay() {
   const toggle = document.getElementById("sniperEnabledToggle");
   const dropTimeInput = document.getElementById("sniperDropTimeInput");
   const leadTimeInput = document.getElementById("sniperLeadTimeInput");
+  const masterToggle = document.getElementById("sevaSniperEnabledToggle");
   if (!countdownEl || !toggle || !dropTimeInput) return;
+
+  if (!masterToggle?.checked) {
+    countdownEl.textContent = "Sniper Idle (Enable Seva & Sniper Automation above)";
+    countdownEl.className = "sniper-countdown-badge";
+    return;
+  }
+
+  if (document.getElementById("autoClickTargetSevaCheckbox")?.checked) {
+    countdownEl.textContent = "Sniper Disabled (service is clicked on page load)";
+    countdownEl.className = "sniper-countdown-badge";
+    return;
+  }
 
   if (!toggle.checked) {
     countdownEl.textContent = "Sniper Idle (Toggle ON to arm)";
@@ -774,7 +966,9 @@ function updateCountdownDisplay() {
 
 let lastFiredDropTime = "";
 
-async function calibrateClock() {
+// `announce`: show a status banner. Only for a manual Sync click - the automatic sync on every popup
+// open stays quiet, since the drift badge in the Clock Sync card already shows the result.
+async function calibrateClock({ announce = false } = {}) {
   const driftBadge = document.getElementById("clockDriftBadge");
   const syncBtn = document.getElementById("syncClockBtn");
   if (driftBadge) {
@@ -796,7 +990,7 @@ async function calibrateClock() {
         const sign = currentDriftMs >= 0 ? "+" : "";
         driftBadge.textContent = `Drift: ${sign}${currentDriftMs}ms (RTT: ${res.rtt}ms)`;
       }
-      setStatus(`Clock calibrated! Drift: ${currentDriftMs}ms (RTT: ${res.rtt}ms)`, "success");
+      if (announce) setStatus(`Clock synced with TTD. Drift: ${currentDriftMs}ms (RTT: ${res.rtt}ms)`);
     } else {
       if (driftBadge) {
         driftBadge.className = "drift-badge uncalibrated";
@@ -814,6 +1008,7 @@ async function calibrateClock() {
 }
 
 async function handleConfigAutoSave() {
+  updateSevaSniperSettingsState();
   const cfg = getSniperConfigFromInputs();
   await chrome.storage.local.set({ [SNIPER_CONFIG_KEY]: cfg });
   updateCountdownDisplay();
@@ -839,7 +1034,8 @@ async function handleConfigAutoSave() {
 
   // Initialize Tabs
   const storedActiveTab = await new Promise((resolve) => {
-    chrome.storage.local.get([ACTIVE_TAB_KEY], (res) => resolve(res[ACTIVE_TAB_KEY] || "seva"));
+    // First ever open: Pilgrim Details. After that: whichever tab was used last.
+    chrome.storage.local.get([ACTIVE_TAB_KEY], (res) => resolve(res[ACTIVE_TAB_KEY] || "pilgrims"));
   });
   initTabs(storedActiveTab);
 
@@ -866,11 +1062,20 @@ async function handleConfigAutoSave() {
   setInterval(updateCountdownDisplay, 50);
 
   // Attach tab 1 events
-  document.getElementById("syncClockBtn")?.addEventListener("click", calibrateClock);
+  document.getElementById("syncClockBtn")?.addEventListener("click", () => calibrateClock({ announce: true }));
+  document.getElementById("targetSevaSelect")?.addEventListener("change", updateArjithaTempleVisibility);
+  document.getElementById("arjithaTempleSelect")?.addEventListener("change", (e) => {
+    populateArjithaSevas(e.target.value, "any");
+  });
+  document.getElementById("arjithaSevaSelect")?.addEventListener("change", updateArjithaFallbackVisibility);
 
   // Auto-save on changing any input in Tab 1
   [
+    "sevaSniperEnabledToggle",
     "targetSevaSelect",
+    "arjithaTempleSelect",
+    "arjithaSevaSelect",
+    "arjithaFallbackSelect",
     "autoClickTargetSevaCheckbox",
     "autoPickerEnabledCheckbox",
     "targetDateField",

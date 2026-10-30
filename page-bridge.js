@@ -9,6 +9,39 @@
   if (window.__TTD_BRIDGE_V2_LOADED__) return;
   window.__TTD_BRIDGE_V2_LOADED__ = true;
 
+  // Count TTD's in-flight requests (fetch + XHR) and publish the number on <html data-ttd-pending>.
+  // The content script waits for it to reach 0 (e.g. calendar reload after a temple change) instead of
+  // sleeping a fixed second. Only counts - requests and responses pass through untouched.
+  (function trackPendingRequests() {
+    var pending = 0;
+    var publish = function(delta) {
+      pending = Math.max(0, pending + delta);
+      try { document.documentElement.setAttribute('data-ttd-pending', String(pending)); } catch (e) {}
+    };
+    publish(0);
+    if (typeof window.fetch === 'function') {
+      var origFetch = window.fetch;
+      window.fetch = function() {
+        publish(1);
+        var done = function() { publish(-1); };
+        try {
+          var p = origFetch.apply(this, arguments);
+          p.then(done, done);
+          return p;
+        } catch (e) {
+          done();
+          throw e;
+        }
+      };
+    }
+    var origSend = XMLHttpRequest.prototype.send;
+    XMLHttpRequest.prototype.send = function() {
+      publish(1);
+      this.addEventListener('loadend', function() { publish(-1); }, { once: true });
+      return origSend.apply(this, arguments);
+    };
+  })();
+
   function getFiberAndProps(el) {
     if (!el) return { fiber: null, props: null };
     var keys = [];
@@ -176,17 +209,131 @@
     dispatchNativeClickSequence(el);
   }
 
+  function waitFor(checkFn, timeoutMs, intervalMs) {
+    return new Promise(function(resolve) {
+      var start = Date.now();
+      (function tick() {
+        var result = checkFn();
+        if (result) return resolve(result);
+        if (Date.now() - start >= timeoutMs) return resolve(null);
+        setTimeout(tick, intervalMs || 25);
+      })();
+    });
+  }
+
+  // TTD's custom dropdowns (tickets, gender, photo ID) TOGGLE on every click, so fire exactly
+  // one opening action at a time and stop as soon as options render - a burst of clicks opens
+  // the menu and immediately closes it again.
+  async function openDropdownStepwise(input, findOptions, waitMs) {
+    var options = findOptions();
+    if (options.length > 0) return options;
+
+    var callProp = function(el, name, type) {
+      return function() {
+        var p = el && getFiberAndProps(el).props;
+        if (!p || typeof p[name] !== 'function') return false;
+        try { p[name](makeSyntheticEvent(el, type)); return true; } catch (e) { return false; }
+      };
+    };
+    var nativeClick = function(el) {
+      return function() {
+        if (!el || typeof el.click !== 'function') return false;
+        el.click();
+        return true;
+      };
+    };
+    var nativeFocus = function(el) {
+      return function() {
+        if (!el) return false;
+        try { el.blur(); el.focus(); return true; } catch (e) { return false; }
+      };
+    };
+
+    var wrapper = input.parentElement;
+    var icon = wrapper && wrapper.querySelector('img');
+    var openers = [
+      callProp(input, 'onClick', 'click'),
+      callProp(input, 'onMouseDown', 'mousedown'),
+      callProp(input, 'onFocus', 'focus'),
+      callProp(wrapper, 'onClick', 'click'),
+      callProp(icon, 'onClick', 'click'),
+      nativeFocus(input),
+      nativeClick(input),
+      nativeClick(icon),
+      nativeClick(wrapper),
+    ];
+
+    for (var i = 0; i < openers.length; i++) {
+      if (!openers[i]()) continue;
+      options = await waitFor(function() {
+        var found = findOptions();
+        return found.length > 0 ? found : null;
+      }, waitMs, 20);
+      if (options) return options;
+    }
+    return [];
+  }
+
+  // Items of the menu that belongs to `input`. CSS-module prefixes change between TTD builds
+  // ("floatingDropdown_listItem", "_36WbrG_listItem"), so match on the stable suffix.
+  function findMenuItems(input) {
+    var wrapper = input.parentElement;
+    var menu = wrapper && wrapper.querySelector('[style*="z-index: 999"], [style*="z-index:999"]');
+    var scope = menu || wrapper;
+    var items = scope ? Array.from(scope.querySelectorAll('[class*="listItem"], li, [role="option"]')) : [];
+    if (items.length === 0) {
+      items = Array.from(document.querySelectorAll('[class*="listItem"]'));
+    }
+    return items.filter(function(el, idx, arr) {
+      return el.textContent && el.textContent.trim() && arr.indexOf(el) === idx;
+    });
+  }
+
+  // One click on a menu option: its React onClick if present, otherwise a native click.
+  function clickMenuOption(el) {
+    var nodes = [el, el.firstElementChild].filter(Boolean);
+    for (var i = 0; i < nodes.length; i++) {
+      var p = getFiberAndProps(nodes[i]).props;
+      if (p && typeof p.onClick === 'function') {
+        try { p.onClick(makeSyntheticEvent(nodes[i], 'click')); return; } catch (e) {}
+      }
+    }
+    try { el.click(); } catch (e) {}
+  }
+
   async function selectTicketsInMainWorld(desiredCount) {
-    const desiredStr = String(desiredCount);
-    console.log('[TTD Bridge] selectTicketsInMainWorld requested count:', desiredStr);
+    const desiredInt = parseInt(desiredCount, 10);
+    console.log('[TTD Bridge] selectTicketsInMainWorld requested count:', desiredInt);
+
+    // Keep in sync with findTicketCountInput() in content.js
+    function findTicketInputEl() {
+      const isTicketInput = el =>
+        el && el.tagName === 'INPUT' && !['templeSelected', 'sevaSelected'].includes(el.getAttribute('name'));
+
+      let el = document.querySelector('input[name="noOfTickets"]');
+      if (el) return el;
+
+      el = Array.from(document.querySelectorAll('[class*="slotHeader"] input')).find(isTicketInput);
+      if (el) return el;
+
+      // Visible "Number of Tickets" label - restricted to text elements so <script> JSON can't match
+      const labelEl = Array.from(document.querySelectorAll('div, span, label, p')).find(
+        node => node.children.length === 0 && /^\s*number\s+of\s+tickets\s*$/i.test(node.textContent)
+      );
+      for (let node = labelEl?.parentElement, depth = 0; node && depth < 3; node = node.parentElement, depth++) {
+        el = Array.from(node.querySelectorAll('input')).find(isTicketInput);
+        if (el) return el;
+      }
+
+      el = Array.from(document.querySelectorAll('#scrollSlotType input')).find(isTicketInput);
+      return el || null;
+    }
 
     let input = null;
-    for (let i = 0; i < 20; i++) {
-      input = document.querySelector('.SlotBooking_slotHeader__bV77N input.floating-input') || 
-              document.querySelector('[class*="SlotBooking_slotHeader"] input') ||
-              document.querySelector('input.floating-input[readonly]');
+    for (let i = 0; i < 25; i++) {
+      input = findTicketInputEl();
       if (input) break;
-      await new Promise(r => setTimeout(r, 50));
+      await new Promise(r => setTimeout(r, 60));
     }
 
     if (!input) {
@@ -195,61 +342,75 @@
       return false;
     }
 
-    if (String(input.value).trim() === desiredStr) {
-      console.log('[TTD Bridge] Ticket count is already', desiredStr);
-      window.dispatchEvent(new CustomEvent('__TTD_TICKETS_SELECTED__', { detail: { success: true, count: desiredStr } }));
-      return true;
-    }
+    function getTicketMenuOptions() {
+      // 1. Direct floating dropdown items that are numeric
+      let direct = Array.from(
+        document.querySelectorAll('.floatingDropdown_listItem__tU_5x, [class*="floatingDropdown_listItem"], [class*="listItem"]')
+      ).filter(el => {
+        const t = el.textContent?.trim();
+        const n = parseInt(t, 10);
+        return !isNaN(n) && n >= 1 && n <= 10 && (t === String(n) || t === String(n).padStart(2, '0'));
+      });
+      if (direct.length > 0) return direct;
 
-    function findTargetOption(valStr) {
-      // 1. Look inside the dropdown menu container under the input or z-index: 999
+      // 2. Menu containers scoped to input wrapper or nearby container
       const wrapper = input.parentElement;
-      const menuContainer = wrapper?.querySelector('[style*="z-index: 999"], [style*="z-index"], [class*="dropdown"]') ||
-                            document.querySelector('[class*="SlotBooking_slotHeader"] [style*="z-index: 999"]') ||
-                            document.querySelector('div[style*="z-index: 999"]');
-      if (menuContainer) {
-        const opts = Array.from(menuContainer.querySelectorAll('*')).filter(el => {
-          const t = el.textContent.trim();
-          return t === valStr && (el.children.length === 0 || (el.children.length === 1 && el.firstElementChild.children.length === 0));
-        });
-        if (opts.length > 0) return opts[0];
-      }
+      const slotContainer = input.closest('#scrollSlotType') || input.closest('[class*="slotHeader"]') || wrapper?.parentElement;
+      const menuContainer = wrapper?.querySelector('[style*="z-index: 999"], [style*="z-index"], .dropdown_scroll, [class*="dropdown"]') ||
+                            wrapper?.parentElement?.querySelector('[style*="z-index: 999"], [style*="z-index"], .dropdown_scroll') ||
+                            slotContainer?.querySelector('[style*="z-index: 999"], .dropdown_scroll, [class*="dropdown"]');
+      if (!menuContainer) return [];
 
-      // 2. Fallback: all elements on page matching valStr that are NOT calendar date cells
-      const all = Array.from(document.querySelectorAll('*')).filter(el => {
-        const t = el.textContent.trim();
-        return t === valStr && el !== input && !el.closest('table') && !el.closest('[class*="DesktopCalender"]') &&
+      const items = Array.from(menuContainer.querySelectorAll('li, div, span')).filter(el => {
+        const t = el.textContent?.trim();
+        const n = parseInt(t, 10);
+        return !isNaN(n) && n >= 1 && n <= 10 && (t === String(n) || t === String(n).padStart(2, '0')) &&
                (el.children.length === 0 || (el.children.length === 1 && el.firstElementChild.children.length === 0));
       });
-      return all[all.length - 1] || null;
+      return items;
     }
 
     function fireReactClickOnOption(optionEl) {
       if (!optionEl) return false;
-      // Check optionEl first, then only its direct parent if no handler found
       const candidates = [optionEl, optionEl.parentElement];
       for (const el of candidates) {
         if (!el) continue;
         const key = Object.keys(el).find(k => k.startsWith('__reactProps') || k.startsWith('__reactEventHandlers'));
-        if (key && el[key] && typeof el[key].onClick === 'function') {
-          try {
-            console.log('[TTD Bridge] Invoking React onClick on option:', el.tagName, el.className, el.textContent.trim());
-            el[key].onClick({
-              isTrusted: true,
-              nativeEvent: { isTrusted: true, button: 0 },
-              preventDefault: () => {},
-              stopPropagation: () => {},
-              target: el,
-              currentTarget: el
-            });
-            return true; // STOP IMMEDIATELY! Do not walk further up or click parent wrapper!
-          } catch (err) {
-            console.warn('[TTD Bridge] Option onClick error:', err);
+        if (key && el[key]) {
+          const p = el[key];
+          if (typeof p.onClick === 'function') {
+            try {
+              console.log('[TTD Bridge] Invoking React onClick on ticket option:', el.tagName, el.className, el.textContent.trim());
+              p.onClick({
+                isTrusted: true,
+                nativeEvent: { isTrusted: true, button: 0 },
+                preventDefault: () => {},
+                stopPropagation: () => {},
+                target: el,
+                currentTarget: el
+              });
+              return true;
+            } catch (err) {
+              console.warn('[TTD Bridge] Option onClick error:', err);
+            }
+          }
+          if (typeof p.onMouseDown === 'function') {
+            try {
+              p.onMouseDown({
+                isTrusted: true,
+                nativeEvent: { isTrusted: true, button: 0 },
+                preventDefault: () => {},
+                stopPropagation: () => {},
+                target: el,
+                currentTarget: el
+              });
+              return true;
+            } catch (err) {}
           }
         }
       }
 
-      // Fallback: native clicks only on optionEl itself
+      // Fallback: native clicks
       try {
         optionEl.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, cancelable: true, view: window, pointerType: 'mouse' }));
         optionEl.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true, view: window }));
@@ -261,93 +422,74 @@
       return true;
     }
 
-    // Step 1: Check if options are ALREADY visible in DOM before clicking to open
-    let target = findTargetOption(desiredStr);
+    // Step 1: Open ticket dropdown if not already open (one toggle at a time)
+    let options = await openDropdownStepwise(input, getTicketMenuOptions, 300);
 
-    if (!target) {
-      // Step 1b: Dropdown not open yet. Open using candidate loop (call ONCE and break)
-      const candidates = [input, input.parentElement, input.parentElement ? input.parentElement.querySelector('img') : null];
-      let opened = false;
-      for (const el of candidates) {
-        if (!el) continue;
-        const key = Object.keys(el).find(k => k.startsWith('__reactProps'));
-        if (key && el[key] && typeof el[key].onClick === 'function') {
-          try {
-            console.log('[TTD Bridge] Opening dropdown via React onClick on:', el.tagName, el.className);
-            el[key].onClick({
-              isTrusted: true,
-              nativeEvent: { isTrusted: true },
-              preventDefault: () => {},
-              stopPropagation: () => {},
-              target: el,
-              currentTarget: el
-            });
-            opened = true;
-            break;
-          } catch (e) {
-            console.warn('[TTD Bridge] Error opening ticket dropdown:', e);
-          }
-        }
-      }
-      if (!opened) {
-        console.log('[TTD Bridge] Falling back to native click on input');
-        input.click();
-      }
+    if (options.length === 0) {
+      console.warn('[TTD Bridge] Could not open ticket dropdown options');
+      window.dispatchEvent(new CustomEvent('__TTD_TICKETS_SELECTED__', { detail: { success: false, reason: 'no_options', count: input.value } }));
+      return false;
+    }
 
-      // Step 2: Poll for options (up to 1500ms)
-      const startFind = Date.now();
-      while (Date.now() - startFind < 1500) {
-        target = findTargetOption(desiredStr);
-        if (target) break;
-        await new Promise(r => setTimeout(r, 40));
+    console.log(`[TTD Bridge] Found ${options.length} ticket options in dropdown`);
+
+    // Step 2: Parse available ticket counts and select best (exact match OR max available <= desired)
+    const availableOptions = [];
+    for (const optEl of options) {
+      const val = parseInt(optEl.textContent.trim(), 10);
+      if (!isNaN(val) && val >= 1) {
+        availableOptions.push({ el: optEl, count: val });
       }
     }
 
-    // Step 2b: Fallback if exact desired count not present (e.g. only 2 or 4 slots allowed)
-    if (!target) {
-      console.warn('[TTD Bridge] Desired count', desiredStr, 'not found in dropdown, checking available options...');
-      const menuContainer = input.parentElement?.querySelector('[style*="z-index: 999"], [style*="z-index"], [class*="dropdown"]') ||
-                            document.querySelector('div[style*="z-index: 999"]');
-      const allOpts = menuContainer ? Array.from(menuContainer.querySelectorAll('*')).filter(el => {
-        const n = parseInt(el.textContent.trim(), 10);
-        return !isNaN(n) && n >= 1 && n <= 10 && (el.children.length === 0 || (el.children.length === 1 && el.firstElementChild.children.length === 0));
-      }) : [];
-      if (allOpts.length > 0) {
-        allOpts.sort((a, b) => parseInt(b.textContent.trim(), 10) - parseInt(a.textContent.trim(), 10));
-        target = allOpts.find(el => parseInt(el.textContent.trim(), 10) <= desiredCount) || allOpts[0];
-        console.log('[TTD Bridge] Selected best available option:', target.textContent.trim());
-      }
-    }
+    let best = availableOptions.find(o => o.count === desiredInt);
 
-    // Step 3: Click target option via React handler
-    if (target) {
-      console.log('[TTD Bridge] Clicking option:', target.tagName, target.className, target.textContent.trim());
-      fireReactClickOnOption(target);
+    // If desired (e.g. 5) is not available: select the MAX available number <= desiredInt
+    if (!best) {
+      const eligible = availableOptions.filter(o => o.count <= desiredInt).sort((a, b) => b.count - a.count);
+      if (eligible.length > 0) {
+        best = eligible[0]; // Maximum available number <= desired
+      } else {
+        // If all available options are > desiredInt, pick the lowest
+        availableOptions.sort((a, b) => a.count - b.count);
+        best = availableOptions[0];
+      }
+      console.log(`[TTD Bridge] Desired ${desiredInt} not in options. Selecting max available: ${best.count}`);
     } else {
-      console.warn('[TTD Bridge] Option not found for count:', desiredStr);
+      console.log(`[TTD Bridge] Desired ${desiredInt} found in dropdown options.`);
     }
 
-    // Poll to verify input.value has changed (up to 800ms)
+    // Step 3: Click the target option
+    fireReactClickOnOption(best.el);
+
+    // Step 4: Verify input.value updated (up to 800ms)
+    let isSuccess = false;
     const startVerify = Date.now();
     while (Date.now() - startVerify < 800) {
-      if (String(input.value).trim() === desiredStr) break;
+      if (parseInt(input.value, 10) === best.count) {
+        isSuccess = true;
+        break;
+      }
       await new Promise(r => setTimeout(r, 40));
     }
 
-    // If still not updated and target is available, retry click once
-    if (String(input.value).trim() !== desiredStr && target) {
-      console.log('[TTD Bridge] Retrying option click once...');
-      fireReactClickOnOption(target);
+    // Retry once if not updated
+    if (!isSuccess) {
+      console.log('[TTD Bridge] Retrying ticket option click once...');
+      fireReactClickOnOption(best.el);
       const startVerify2 = Date.now();
       while (Date.now() - startVerify2 < 600) {
-        if (String(input.value).trim() === desiredStr) break;
+        if (parseInt(input.value, 10) === best.count) {
+          isSuccess = true;
+          break;
+        }
         await new Promise(r => setTimeout(r, 40));
       }
     }
 
-    console.log('[TTD Bridge] Final ticket input value:', input.value);
+    console.log('[TTD Bridge] Final ticket input value:', input.value, 'Target:', best.count, 'Success:', isSuccess);
     window.dispatchEvent(new CustomEvent('__TTD_TICKETS_SELECTED__', {
-      detail: { success: String(input.value).trim() === desiredStr, count: input.value }
+      detail: { success: isSuccess || parseInt(input.value, 10) === best.count, count: input.value, selectedCount: best.count }
     }));
     return true;
   }
@@ -374,6 +516,24 @@
     return false;
   }
 
+  function matchTempleText(actual, expected) {
+    const a = normalizeOptionText(actual);
+    const b = normalizeOptionText(expected);
+    if (!a || !b) return false;
+    if (a === b) return true;
+    if (a.includes(b) || b.includes(a)) return true;
+
+    const keyTokens = [
+      "srivari", "tirumala", "pradakshina", "govindaraja", "padmavathi",
+      "srinivasamangapuram", "appalayagunta", "surya", "narayanavanam",
+      "vontimitta", "thallapaka", "karvetinagaram"
+    ];
+    for (const token of keyTokens) {
+      if (b.includes(token) && a.includes(token)) return true;
+    }
+    return false;
+  }
+
   async function selectDropdownInMainWorld(value) {
     const input = document.querySelector('[data-ttd-target="active"]');
     if (!input) {
@@ -387,127 +547,163 @@
         return true;
       }
 
-      const candidates = [
-        input,
-        input.parentElement,
-        input.parentElement?.parentElement,
-        input.parentElement?.querySelector('img')
-      ];
-
-      function findOptionsInMainWorld(valStr) {
-        const wrapper = input.parentElement;
-
-        // 1. Instant direct option discovery (fastest path from previous commit)
-        let direct = Array.from(wrapper?.querySelectorAll('[class*="floatingDropdown_listItem"]') || []);
-        if (direct.length === 0) {
-          direct = Array.from(document.querySelectorAll('[class*="floatingDropdown_listItem"]'));
-        }
-        if (direct.length > 0) {
-          const matchDirect = direct.filter(el => matchOptionText(el.textContent, valStr));
-          if (matchDirect.length > 0) return matchDirect;
-
-          const s = String(valStr || '').toLowerCase();
-          if (s.includes('aadhaar') || s.includes('aadhar')) {
-            const aadh = direct.filter(el => el.textContent.toLowerCase().includes('aadhaar') || el.textContent.toLowerCase().includes('aadhar'));
-            if (aadh.length > 0) return aadh;
-            return [direct[0]];
-          }
-          if (s.includes('passport')) {
-            const pass = direct.filter(el => el.textContent.toLowerCase().includes('passport'));
-            if (pass.length > 0) return pass;
-          }
-          return direct;
-        }
-
-        // 2. Fallback to container leaves if CSS modules hash differs
-        const menuContainer = wrapper?.querySelector('[style*="z-index: 999"], [style*="z-index"], [class*="dropdown"]') ||
-                              wrapper?.parentElement?.querySelector('[style*="z-index: 999"], [style*="z-index"], [class*="dropdown"]');
-        if (menuContainer) {
-          const allLeaves = Array.from(menuContainer.querySelectorAll('*')).filter(el => {
-            const t = el.textContent?.trim();
-            return t && (el.children.length === 0 || (el.children.length === 1 && el.firstElementChild.children.length === 0));
-          });
-          const matching = allLeaves.filter(el => matchOptionText(el.textContent, valStr));
-          if (matching.length > 0) return matching;
-
-          const s = String(valStr || '').toLowerCase();
-          if (s.includes('aadhaar') || s.includes('aadhar')) {
-            const aadhaarOpts = allLeaves.filter(el => {
-              const t = el.textContent.toLowerCase();
-              return t.includes('aadhaar') || t.includes('aadhar');
-            });
-            if (aadhaarOpts.length > 0) return aadhaarOpts;
-            if (allLeaves.length > 0) return [allLeaves[0]];
-          }
-          if (s.includes('passport')) {
-            const passOpts = allLeaves.filter(el => el.textContent.toLowerCase().includes('passport'));
-            if (passOpts.length > 0) return passOpts;
-          }
-        }
-        return [];
+      // 1. Open this input's menu one toggle at a time
+      const options = await openDropdownStepwise(input, () => findMenuItems(input), 250);
+      if (options.length === 0) {
+        console.warn('[TTD Bridge] Dropdown did not open for value:', value);
+        return false;
       }
 
-      // 1. Check if options are already open
-      let options = findOptionsInMainWorld(value);
-
-      // 2. Try candidates with rapid 40ms checks to find the one that opens the menu
-      if (!options || options.length === 0) {
-        for (const c of candidates) {
-          const key = Object.keys(c).find(k => k.startsWith('__reactProps'));
-          if (key && c[key]) {
-            const p = c[key];
-            if (typeof p.onClick === 'function') {
-              console.log('[TTD Bridge] Firing React onClick on candidate:', c.tagName);
-              p.onClick({ isTrusted: true, nativeEvent: { isTrusted: true }, preventDefault: ()=>{}, stopPropagation: ()=>{}, target: c, currentTarget: c });
-            } else if (typeof p.onMouseDown === 'function') {
-              console.log('[TTD Bridge] Firing React onMouseDown on candidate:', c.tagName);
-              p.onMouseDown({ isTrusted: true, nativeEvent: { isTrusted: true }, preventDefault: ()=>{}, stopPropagation: ()=>{}, target: c, currentTarget: c });
-            }
-          }
-
-          // Rapid 40ms check for options
-          const startWait = Date.now();
-          while (Date.now() - startWait < 40) {
-            await new Promise(r => setTimeout(r, 10));
-            options = findOptionsInMainWorld(value);
-            if (options && options.length > 0) break;
-          }
-
-          if (options && options.length > 0) break;
-        }
+      // 2. Click the matching option only - never fall back to options[0] (would pick a wrong gender)
+      const target = options.find(el => matchOptionText(el.textContent, value));
+      if (!target) {
+        console.warn('[TTD Bridge] No option matches "' + value + '" in:', options.map(o => o.textContent.trim()));
+        return false;
       }
+      console.log('[TTD Bridge] Clicking option:', target.textContent.trim());
+      clickMenuOption(target);
 
-      if (options && options.length > 0) {
-        const target = options.find(el => matchOptionText(el.textContent, value)) || options[0];
-        if (target) {
-          console.log('[TTD Bridge] Clicking option:', target.textContent.trim());
-          const key = Object.keys(target).find(k => k.startsWith('__reactProps')) || 
-                      Object.keys(target.parentElement).find(k => k.startsWith('__reactProps'));
-          const propsEl = target[key] ? target : target.parentElement;
-          if (propsEl && propsEl[key]?.onClick) {
-            propsEl[key].onClick({ isTrusted: true, nativeEvent: { isTrusted: true }, preventDefault: ()=>{}, stopPropagation: ()=>{}, target: propsEl, currentTarget: propsEl });
-          } else {
-            target.click();
-          }
-        }
+      // 3. Verify; if React ignored the handler call, retry once with a native click
+      let ok = !!(await waitFor(() => matchOptionText(input.value, value), 600, 20));
+      if (!ok && target.isConnected) {
+        try { target.click(); } catch (e) {}
+        ok = !!(await waitFor(() => matchOptionText(input.value, value), 600, 20));
       }
-
-      // Snappy 60ms verification wait exactly as previous commit
-      if (!matchOptionText(input.value, value)) {
-        const startVerify = Date.now();
-        while (Date.now() - startVerify < 60) {
-          await new Promise(r => setTimeout(r, 10));
-          if (matchOptionText(input.value, value)) break;
-        }
-      }
-
-      return matchOptionText(input.value, value);
+      return ok;
     } finally {
       const isSuccess = matchOptionText(input.value, value);
       console.log('[TTD Bridge] Final dropdown value:', input.value, 'Success:', isSuccess);
       input.removeAttribute('data-ttd-target');
       window.dispatchEvent(new CustomEvent('__TTD_DROPDOWN_SELECTED__', { detail: { value: input.value, success: isSuccess } }));
     }
+  }
+
+  async function selectTempleInMainWorld(targetTemple) {
+    if (!targetTemple) return false;
+    console.log('[TTD Bridge] selectTempleInMainWorld requested:', targetTemple);
+
+    const input = document.querySelector('input[name="templeSelected"]') ||
+                  document.querySelector('input[placeholder*="Select Temple"]') ||
+                  document.querySelector('input[label="Temple"]');
+
+    if (!input) {
+      console.warn('[TTD Bridge] Temple input not found');
+      window.dispatchEvent(new CustomEvent('__TTD_TEMPLE_SELECTED__', { detail: { success: false, reason: 'input_not_found' } }));
+      return false;
+    }
+
+    if (matchTempleText(input.value, targetTemple)) {
+      console.log('[TTD Bridge] Temple already matches:', input.value);
+      window.dispatchEvent(new CustomEvent('__TTD_TEMPLE_SELECTED__', { detail: { success: true, temple: input.value } }));
+      return true;
+    }
+
+    // Open the menu one toggle at a time (the old onClick + native click pair toggled it shut again)
+    const options = await openDropdownStepwise(input, () => findMenuItems(input), 250);
+    if (options.length === 0) {
+      console.warn('[TTD Bridge] Could not open temple dropdown');
+      window.dispatchEvent(new CustomEvent('__TTD_TEMPLE_SELECTED__', { detail: { success: false, reason: 'no_options' } }));
+      return false;
+    }
+
+    const target = options.find(el => matchTempleText(el.textContent, targetTemple)) ||
+                   options.find(el => matchOptionText(el.textContent, targetTemple));
+    if (!target) {
+      console.warn('[TTD Bridge] Target temple option not found in list:', targetTemple);
+      window.dispatchEvent(new CustomEvent('__TTD_TEMPLE_SELECTED__', { detail: { success: false, reason: 'target_not_found' } }));
+      return false;
+    }
+
+    console.log('[TTD Bridge] Clicking temple option:', target.textContent.trim());
+    try { target.scrollIntoView({ block: 'nearest', behavior: 'instant' }); } catch (e) {}
+    clickMenuOption(target);
+    let isSuccess = !!(await waitFor(() => matchTempleText(input.value, targetTemple), 600, 20));
+    if (!isSuccess && target.isConnected) {
+      try { target.click(); } catch (e) {}
+      isSuccess = !!(await waitFor(() => matchTempleText(input.value, targetTemple), 600, 20));
+    }
+
+    console.log('[TTD Bridge] Final temple value:', input.value, 'Success:', isSuccess);
+    window.dispatchEvent(new CustomEvent('__TTD_TEMPLE_SELECTED__', { detail: { success: isSuccess, temple: input.value } }));
+    return isSuccess;
+  }
+
+  // Guards against overlapping Continue requests (each one would click again)
+  let continueInFlight = false;
+
+  async function clickContinueInMainWorld() {
+    console.log('[TTD Bridge] clickContinueInMainWorld requested');
+    if (continueInFlight) {
+      console.log('[TTD Bridge] Continue already in flight - ignoring duplicate request');
+      return false;
+    }
+    continueInFlight = true;
+
+    // Calendar Continue only: once the pilgrim form (a "Name" field) is up, its Continue matches the
+    // same selectors, and clicking it submits the empty form - lighting up every validation error.
+    // Visible form only: TTD's Arjitha page can keep a hidden pilgrim form in the DOM on the slot step
+    function onPilgrimForm() {
+      return Array.from(document.querySelectorAll('label')).some(l => {
+        if (!/^name\W*$/i.test(l.textContent.trim())) return false;
+        const r = l.getBoundingClientRect();
+        return r.width > 0 && r.height > 0 && getComputedStyle(l).visibility !== 'hidden';
+      });
+    }
+
+    // <button> elements only, labelled Continue. Arjitha wraps both buttons in
+    // <div class="mg5vGq_desktop-continue-btn"> - matching that div clicked nothing, and the old
+    // child-handler fallback then fired the Back button too (bouncing to the home page).
+    function findContinueBtn() {
+      if (onPilgrimForm()) return null;
+      const isContinue = b => b && /^continue$/i.test(b.textContent.trim());
+      const candidates = [
+        ...document.querySelectorAll('button[class*="continue-btn"], button[class*="PilgrimSlotBooking_continue"], button[class*="purpleDesktopButton"], button[class*="SlotBooking_purple"]'),
+        ...document.querySelectorAll('button'),
+      ];
+      return candidates.find(isContinue) || null;
+    }
+
+    // Wait up to 2500ms for Continue button to be present and enabled
+    let continueBtn = null;
+    const start = Date.now();
+    while (Date.now() - start < 2500) {
+      continueBtn = findContinueBtn();
+      if (continueBtn && !continueBtn.disabled && !continueBtn.getAttribute('disabled') && !continueBtn.classList.contains('disabled')) {
+        break;
+      }
+      await new Promise(r => setTimeout(r, 40));
+    }
+
+    if (!continueBtn) {
+      console.warn('[TTD Bridge] Continue button not found or remained disabled');
+      continueInFlight = false;
+      window.dispatchEvent(new CustomEvent('__TTD_CONTINUE_CLICKED__', { detail: { success: false } }));
+      return false;
+    }
+
+    console.log('[TTD Bridge] Found enabled Continue button. Clicking once...');
+
+    // Exactly ONE click per attempt. Every extra click fires another slot-block request, and TTD
+    // (Arjitha Seva especially) treats the duplicates as a conflicting booking and bounces to home.
+    try { continueBtn.scrollIntoView({ block: 'nearest', behavior: 'instant' }); } catch (e) {}
+    continueBtn.click();
+
+    // Second (and last) attempt only if nothing happened at all: still on the calendar after 2.5s with
+    // Continue still enabled. Uses the React handler directly in case the native click was ignored.
+    setTimeout(() => {
+      const stillThere = findContinueBtn();
+      if (stillThere && stillThere === continueBtn && !stillThere.disabled && document.contains(stillThere)) {
+        console.log('[TTD Bridge] Continue had no effect after 2.5s - trying its React handler once...');
+        const p = getFiberAndProps(stillThere).props;
+        if (p && typeof p.onClick === 'function') {
+          try { p.onClick(makeSyntheticEvent(stillThere, 'click')); } catch (e) {}
+        }
+      }
+      continueInFlight = false;
+    }, 2500);
+
+    window.dispatchEvent(new CustomEvent('__TTD_CONTINUE_CLICKED__', { detail: { success: true } }));
+    return true;
   }
 
   window.addEventListener(
@@ -536,6 +732,24 @@
       if (e.detail && e.detail.value) {
         selectDropdownInMainWorld(e.detail.value);
       }
+    },
+    true
+  );
+
+  window.addEventListener(
+    "__TTD_SELECT_TEMPLE__",
+    function(e) {
+      if (e.detail && e.detail.temple) {
+        selectTempleInMainWorld(e.detail.temple);
+      }
+    },
+    true
+  );
+
+  window.addEventListener(
+    "__TTD_CLICK_CONTINUE__",
+    function() {
+      clickContinueInMainWorld();
     },
     true
   );
