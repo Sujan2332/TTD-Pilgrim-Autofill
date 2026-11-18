@@ -2888,8 +2888,7 @@ async function initSniperScheduler(overrideConfig = null) {
 // 5. Virtual-queue re-roll - automatic, no popup setting (and independent of the Seva & Sniper switch).
 // TTD's waiting room shows the wait as "MM:SS" inside .circularProgress next to "You've been placed in
 // a virtual queue...". If that wait is over QUEUE_MAX_WAIT_SECS, clear ALL of the site's localStorage and
-// hard-refresh (background reloads with the cache bypassed) - repeated on each load until the wait is within
-// the limit. Bounded: one decision per queue appearance, at most QUEUE_REROLL_MAX_TRIES in a row.
+// reload - repeated on each load until the wait is within the limit. Bounded: one decision per queue appearance, at most QUEUE_REROLL_MAX_TRIES in a row.
 // Note: localStorage normally holds just "user-access". It is re-issued on every load while the login itself
 // survives (so it isn't the login token) and it is what ties the tab to its queue place - so it is cleared too.
 const QUEUE_REROLL_STATE_KEY = "ttdQueueReroll"; // sessionStorage: { tries } - survives the reloads
@@ -2912,7 +2911,8 @@ function readQueueWaitSeconds() {
 // seva-dip/dashboard), long after this script started - a watcher that gave up after 15s missed it.
 // One decision per queue appearance; resets when the queue goes away.
 function watchVirtualQueue() {
-  console.log("[TTD Autofill] Virtual queue watcher running on this tab.");
+  const watcherStartMs = Math.round(performance.now());
+  console.log(`[TTD Autofill] Virtual queue watcher running on this tab (${watcherStartMs} ms after page load started).`);
   let firstReading = null; // { secs, at } - the timer must be seen counting before we trust it
   let decided = false;
   let lastQueueSeenAt = 0;
@@ -2931,29 +2931,36 @@ function watchVirtualQueue() {
     }
     lastQueueSeenAt = Date.now();
     if (decided) return;
+    const limitSecs = QUEUE_MAX_WAIT_SECS;
     if (!firstReading) {
       firstReading = { secs, at: Date.now() };
-      return;
-    }
-    // Trust the timer once two readings ~0.2s apart agree (same second, or one tick down). A 0:00 reading
-    // can be the placeholder painted before TTD's data arrives, so that one still gets the full 1.5s.
-    const elapsed = Date.now() - firstReading.at;
-    const consistent = secs <= firstReading.secs && firstReading.secs - secs <= 1;
-    if (elapsed < 200 || (secs === 0 && elapsed < 1500)) return;
-    if (!consistent) {
-      firstReading = { secs, at: Date.now() }; // value jumped (data just arrived) - start over
-      return;
+      // Over the limit: act on the first reading - every ms counts while re-rolling. (0:00 is the only
+      // placeholder seen before TTD's data arrives, and it's never over the limit.)
+      if (secs <= limitSecs) return;
+    } else {
+      // Within the limit there's no hurry: trust it once two readings ~0.2s apart agree (same second, or one
+      // tick down). A 0:00 reading can be the placeholder painted before TTD's data arrives - give it 1.5s.
+      const elapsed = Date.now() - firstReading.at;
+      const consistent = secs <= firstReading.secs && firstReading.secs - secs <= 1;
+      if (secs > limitSecs) {
+        // value jumped above the limit (data just arrived) - act now
+      } else if (elapsed < 200 || (secs === 0 && elapsed < 1500)) {
+        return;
+      } else if (!consistent) {
+        firstReading = { secs, at: Date.now() }; // value jumped (data just arrived) - start over
+        return;
+      }
     }
 
     decided = true;
+    const pageMs = Math.round(performance.now()); // since this page load started - shows where the time goes
 
-    const limitSecs = QUEUE_MAX_WAIT_SECS;
     const shown = `${Math.floor(secs / 60)}:${String(secs % 60).padStart(2, "0")}`;
     let state = {};
     try { state = JSON.parse(sessionStorage.getItem(QUEUE_REROLL_STATE_KEY) || "{}"); } catch (e) {}
 
     if (secs <= limitSecs) {
-      console.log(`[TTD Autofill] Virtual queue wait ${shown} is within ${limitSecs / 60} min - waiting it out.`);
+      console.log(`[TTD Autofill] Virtual queue wait ${shown} is within ${limitSecs / 60} min - waiting it out (decided ${pageMs} ms after page load started; watcher started at ${watcherStartMs} ms).`);
       showToast(`Queue wait ${shown} - within ${limitSecs / 60} min, waiting it out.`, "success");
       sessionStorage.removeItem(QUEUE_REROLL_STATE_KEY);
       return;
@@ -2982,13 +2989,13 @@ function watchVirtualQueue() {
     } catch (e) {
       console.warn("[TTD Autofill] Could not clear localStorage:", e);
     }
-    console.log(`[TTD Autofill] Virtual queue wait ${shown} > ${limitSecs / 60} min - cleared ${cleared} localStorage item(s), reloading (try ${tries}/${QUEUE_REROLL_MAX_TRIES}).`);
+    console.log(`[TTD Autofill] Virtual queue wait ${shown} > ${limitSecs / 60} min - cleared ${cleared} localStorage item(s), reloading (try ${tries}/${QUEUE_REROLL_MAX_TRIES}; decided ${pageMs} ms after page load started; watcher started at ${watcherStartMs} ms).`);
     showToast(`Queue wait ${shown} > ${limitSecs / 60} min - cleared local storage (${cleared}), re-rolling (try ${tries}/${QUEUE_REROLL_MAX_TRIES})...`, "info");
     // Plain reload, straight from here: TTD's files come from the browser cache (a cache-bypassing hard
     // refresh re-downloaded several MB per try from an overloaded server). The cleared localStorage is what
     // gets a fresh queue place.
     location.reload();
-  }, 100); // only a cheap element lookup on non-queue pages
+  }, 50); // only a cheap element lookup on non-queue pages
 }
 
 if (window[CONTENT_SCRIPT_INSTANCE_KEY] === CONTENT_SCRIPT_INSTANCE) {
