@@ -22,8 +22,12 @@ Maybe you travel as a family and book for different combinations on different da
 
 | Feature | Description |
 |--------|-------------|
-| **Tabbed Control Center** | Organized into **⚡ Seva &amp; Sniper** and **👥 Pilgrim Details** tabs for a clean, clutter-free interface. |
-| **Calendar &amp; Slot Auto-Picker** | Automatically selects target date (Option A) or first green date, preferred slot time, tickets, and clicks Continue into the form. |
+| **Tabbed Control Center** | Organized into **⚡ Seva &amp; Sniper** and **👥 Pilgrim Details** tabs for a clean, clutter-free interface. Opens on Pilgrim Details the first time, then on the tab you used last. |
+| **Seva &amp; Sniper master switch** | **Enable Seva &amp; Sniper Automation** (off by default). When off, nothing on the Seva &amp; Sniper tab triggers automatically. |
+| **Target Seva / Service** | Auto-clicks the chosen Pilgrim Service tile (Special Entry Darshan, PAT / Ammavari, Arjitha Sevas, Accommodation, …) either as soon as the page loads, or at drop time via the Quota Sniper. |
+| **Arjitha Seva selection** | Pick the **temple** and **seva**. If that seva isn't offered on the date, choose what happens: ask you, auto-pick a **same-price** seva, or auto-pick **any available** seva. Seva prices are learned live from TTD's pages, so "same price" stays accurate. |
+| **Calendar &amp; Slot Auto-Picker** | Toggle **ON**: picks the first available date &amp; slot instantly. Toggle **OFF**: uses your target date (Option A, with optional fallback to the first green date) and preferred slot - if that slot isn't offered, the closest earlier slot is picked. Then sets tickets and clicks Continue into the form. |
+| **No. of Pilgrims** | Number of pilgrims to book (default 5, up to 6; **max 2 for Arjitha Sevas**). Sevas that admit several persons per ticket get fewer tickets automatically (e.g. 2 pilgrims on a "2 Persons" seva = 1 ticket). With Seva &amp; Sniper on, only that many selected pilgrims are filled. |
 | **Atomic Clock Calibration** | Pings TTD's web server to calculate local clock drift and round-trip latency in milliseconds. |
 | **Quota Drop Sniper** | Sub-millisecond precision scheduler that triggers booking action right at the quota drop (e.g. 09:59:59.750 for 10:00 AM). |
 | **Multiple groups** | Store several families or trip combinations (default: 3 groups, 5 pilgrims each). Add more with **+ Add Group**. |
@@ -36,6 +40,11 @@ Maybe you travel as a family and book for different combinations on different da
 | **Continue &amp; Pay Now** | Optional: click through Continue / Confirm and Pay Now after filling. |
 | **Payment helper** | Choose **UPI / Generate QR** or **Credit / Debit card**; card details can be stored locally or imported from JSON. |
 | **On-page toasts** | Status messages appear on the TTD page even when the popup is closed. |
+| **Field validation** | Pilgrim details are checked as you type, with a red outline and a message under the row: Aadhaar must be 12 digits and pass Aadhaar's check digit (catches a mistyped digit), Passport must be 1 letter + 7 digits, the same ID can't be used twice, plus name, age (1-120), gender and ID type. Autofill won't run for selected pilgrims with errors. |
+| **Booking-in-progress pause** | If TTD says "booking already in progress" (e.g. after leaving an earlier attempt at the payment page), all automation pauses instead of retrying in a loop. A prompt lets you **Resume** (also closes TTD's alert) or stay paused; going back to the home page also restarts automation. |
+| **Virtual queue re-roll** | Automatic, no setting needed. If TTD's virtual queue shows a wait over **2 minutes**, the extension clears the site's local storage and reloads, until the wait is 2 minutes or less (at most 25 tries in a row). Works only on the queue page. |
+| **Keyboard-friendly prompts** | On-page prompts (seva not available, booking paused) work with **↑ / ↓**, **Enter** and **Esc**, even while a TTD alert is open. |
+| **Autofill button count** | The button shows how many pilgrims are selected, e.g. **Autofill Selected 2 Pilgrims**. |
 
 ---
 
@@ -206,7 +215,7 @@ To change the shortcut: `chrome://extensions/shortcuts` → find **TTD Pilgrim A
 2. **Select pilgrims before** the form loads if you use auto-run.
 3. **Turn off** “Continue and Pay Now” while testing fills; turn it on only when you trust your data.
 4. If autofill misses a field, the site may have changed—fill manually and report issues if you maintain a fork.
-5. Do not run multiple conflicting bookings; the extension detects some “booking already in progress” messages and surfaces them in the toast.
+5. Do not run multiple conflicting bookings; when TTD reports “booking already in progress”, the extension pauses all automation and shows a prompt so you can resume once the earlier booking is cleared.
 
 ---
 
@@ -229,8 +238,14 @@ ttd-autofill-extension/
 ├── manifest.json          # Extension manifest (MV3)
 ├── popup.html / popup.css / popup.js   # Popup UI and storage
 ├── content.js             # Form fill logic on TTD site
-├── background.js          # Keyboard shortcut handler
+├── page-bridge.js         # Runs in the page itself: dropdowns, Continue clicks, request tracking
+├── background.js          # Keyboard shortcut handler, TTD clock sync
 ├── icons/                 # Extension icons
+├── reference-pages/       # Saved TTD pages used to build and test against (not loaded by the extension)
+│   ├── home/              #   Pilgrim Services list
+│   ├── queue/             #   Virtual queue page
+│   ├── calendar/          #   Slot calendar (PAT / Ammavari)
+│   └── arjitha-seva/      #   Arjitha Seva pages + temples/ (one saved page per temple)
 └── ttd-card-details-sample.json
 ```
 
