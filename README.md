@@ -150,7 +150,26 @@ Data is saved automatically in the browser as you type.
 
 1. Under **Payment method**, choose **Credit / Debit card**.
 2. Expand **Card Details** and enter fields manually, **or**
-3. Use **Card Sample JSON** / **Import Card JSON** (see `ttd-card-details-sample.json` in this repo for the shape).
+3. Click **Import Card JSON** and choose a `.json` file.
+4. Format: a **single object** with the four card fields (all as text):
+
+```json
+{
+  "cardNumber": "4111111111111111",
+  "expiry": "12/30",
+  "cvv": "123",
+  "cardName": "TEST CARDHOLDER"
+}
+```
+
+| Field | What to enter |
+|-------|---------------|
+| `cardNumber` | Card number, digits only (spaces are removed when filling) |
+| `expiry` | Expiry as `MM/YY` |
+| `cvv` | 3- or 4-digit security code |
+| `cardName` | Name exactly as printed on the card |
+
+5. Use **Card Sample JSON** in the popup to download this template (also in this repo as `ttd-card-details-sample.json`).
 
 > **Security:** Card details are stored in **Chrome local storage** on your device only. Never share your JSON exports publicly. Prefer UPI if you do not need card autofill.
 
