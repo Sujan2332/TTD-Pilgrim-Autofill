@@ -73,4 +73,15 @@ test("choosing Arjitha Sevas keeps the picked temple and seva", async () => {
   assert(saved.arjithaSeva === seva, `seva not kept: "${saved.arjithaSeva}" (picked "${seva}")`);
 });
 
+test("sniper lead time 0 is saved as 0 (fires exactly at the drop time)", async () => {
+  const storage = { ttdSniperConfig: { sevaSniperEnabled: true, sniperEnabled: true, leadTimeMs: 250 } };
+  const w = await loadPopup(storage);
+  const input = w.document.getElementById("sniperLeadTimeInput");
+  input.value = "0";
+  input.dispatchEvent(new w.Event("input", { bubbles: true }));
+  input.dispatchEvent(new w.Event("change", { bubbles: true }));
+  await sleep(200);
+  assert(storage.ttdSniperConfig.leadTimeMs === 0, `saved lead time: ${storage.ttdSniperConfig.leadTimeMs}`);
+});
+
 run();

@@ -822,7 +822,7 @@ function getDefaultSniperConfig() {
     autoContinueCalendar: true,
     sniperEnabled: false,
     dropTime: "10:00:00",
-    leadTimeMs: 250,
+    leadTimeMs: 0, // fire at the drop time itself
   };
 }
 
@@ -895,7 +895,7 @@ function getSniperConfigFromInputs() {
     autoContinueCalendar: !!document.getElementById("autoContinueCalendarCheckbox")?.checked,
     sniperEnabled: !!document.getElementById("sniperEnabledToggle")?.checked,
     dropTime: document.getElementById("sniperDropTimeInput")?.value || "10:00:00",
-    leadTimeMs: parseInt(document.getElementById("sniperLeadTimeInput")?.value, 10) || 250,
+    leadTimeMs: Math.max(0, parseInt(document.getElementById("sniperLeadTimeInput")?.value, 10) || 0), // 0 = exactly at the drop time
   };
 }
 
@@ -971,7 +971,7 @@ function applySniperConfigToInputs(config) {
     document.getElementById("sniperDropTimeInput").value = config.dropTime || "10:00:00";
   }
   if (document.getElementById("sniperLeadTimeInput")) {
-    document.getElementById("sniperLeadTimeInput").value = config.leadTimeMs ?? 250;
+    document.getElementById("sniperLeadTimeInput").value = config.leadTimeMs ?? 0;
   }
   updateSevaSniperSettingsState(); // all inputs are filled now - refresh the enabled/disabled groups
 }

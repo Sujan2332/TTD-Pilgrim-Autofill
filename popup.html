@@ -231,11 +231,11 @@
           <div class="lead-time-row">
             <label class="form-label" for="sniperLeadTimeInput">Transit Lead Time (Early fire offset)</label>
             <div class="lead-time-input-wrap">
-              <input type="number" id="sniperLeadTimeInput" value="250" min="0" max="2000" step="50" class="form-input lead-input" />
+              <input type="number" id="sniperLeadTimeInput" value="0" min="0" max="2000" step="50" class="form-input lead-input" />
               <span class="lead-unit">ms</span>
             </div>
           </div>
-          <div class="field-hint">Triggers ~250ms before drop so network packet arrives right at 10:00:00.000</div>
+          <div class="field-hint">0 = fires exactly at the drop time (e.g. 10:00:00.000). A value fires that many ms earlier.</div>
         </div>
 
         <div id="sniperCountdownDisplay" class="sniper-countdown-badge">Sniper idle (Toggle ON to arm)</div>

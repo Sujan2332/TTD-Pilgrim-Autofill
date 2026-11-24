@@ -2662,6 +2662,72 @@ chrome.storage.onChanged.addListener((changes, area) => {
   }
 });
 
+// Release-time curtain: at the drop TTD shows /curtain?section=dashboard (an announcement, no service tiles)
+// and it doesn't lift by itself. The sniper then opens the dashboard and clicks the target there: a pending
+// note in sessionStorage survives the navigation, and the dashboard's on-load click honours it. If the
+// curtain comes back, retry once a second - bounded, so TTD isn't hammered.
+const SNIPER_PENDING_KEY = "ttdSniperPendingSeva"; // sessionStorage: { targetSeva, until, tries }
+const CURTAIN_MAX_TRIES = 120; // ~2 minutes at one try a second
+const CURTAIN_RELOADS_FIRST = 5; // tries 1-5 refresh the page; later ones open /home/dashboard
+const CURTAIN_RETRY_MS = 1000;
+const SNIPER_PENDING_MS = 2 * 60 * 1000;
+
+function isCurtainPage() {
+  return /^\/curtain\b/i.test(location.pathname);
+}
+
+function readSniperPending() {
+  try {
+    const pending = JSON.parse(sessionStorage.getItem(SNIPER_PENDING_KEY) || "null");
+    if (pending?.targetSeva && Date.now() < pending.until) return pending;
+  } catch (e) {}
+  sessionStorage.removeItem(SNIPER_PENDING_KEY);
+  return null;
+}
+
+function leaveCurtainForTargetSeva(targetSeva) {
+  if (!targetSeva || targetSeva === "none") return;
+  const tries = (readSniperPending()?.tries || 0) + 1;
+  if (tries > CURTAIN_MAX_TRIES) {
+    sessionStorage.removeItem(SNIPER_PENDING_KEY);
+    console.warn(`[TTD Sniper] Curtain still up after ${CURTAIN_MAX_TRIES} tries - stopping. Open the dashboard yourself.`);
+    showToast(`Release curtain still up after ${CURTAIN_MAX_TRIES} tries - open the dashboard yourself.`, "error");
+    return;
+  }
+  sessionStorage.setItem(SNIPER_PENDING_KEY, JSON.stringify({ targetSeva, until: Date.now() + SNIPER_PENDING_MS, tries }));
+  // A tile click just before the drop may be what brought up the curtain - its 3s duplicate-click guard
+  // must not swallow the click on the dashboard
+  sessionStorage.removeItem("ttdSevaClickedTime");
+  // Plain refresh first. The curtain's own URL (/curtain?section=dashboard) only lifts on refresh if TTD sends it
+  // back to the dashboard once open - so if it's still up after a few, open the dashboard directly (what worked by hand)
+  if (tries <= CURTAIN_RELOADS_FIRST) {
+    console.log(`[TTD Sniper] Release curtain showing - refreshing to reach "${targetSeva}" (try ${tries}/${CURTAIN_MAX_TRIES}).`);
+    showToast(`Release curtain - refreshing for ${targetSeva}...`, "info");
+    location.reload();
+  } else {
+    console.log(`[TTD Sniper] Release curtain still up - opening the dashboard to click "${targetSeva}" (try ${tries}/${CURTAIN_MAX_TRIES}).`);
+    showToast(`Release curtain - opening the dashboard for ${targetSeva}...`, "info");
+    location.assign("/home/dashboard");
+  }
+}
+
+// Loaded on the curtain again while a sniper click is pending: try the dashboard again after a pause
+function resumeCurtainSniper() {
+  if (!isCurtainPage() || !readSniperPending()) return;
+  setTimeout(async () => {
+    const pending = readSniperPending();
+    if (!pending || !isCurtainPage() || !chrome.runtime?.id || isAutomationHalted()) return;
+    // Master switch turned off meanwhile: stop retrying
+    const config = (await chrome.storage.local.get([SNIPER_CONFIG_KEY]))[SNIPER_CONFIG_KEY] || {};
+    if (!config.sevaSniperEnabled) {
+      sessionStorage.removeItem(SNIPER_PENDING_KEY);
+      console.log("[TTD Sniper] Seva & Sniper automation is OFF - stopped retrying the release curtain.");
+      return;
+    }
+    leaveCurtainForTargetSeva(pending.targetSeva);
+  }, CURTAIN_RETRY_MS);
+}
+
 // 2.5 Auto-Click Target Seva on Dashboard Load (instant zero-delay execution)
 async function maybeAutoClickTargetSeva() {
   let sevaObserver = null;
@@ -2698,6 +2764,15 @@ async function maybeAutoClickTargetSeva() {
     try {
       const config = cachedSniperConfig || (await chrome.storage.local.get([SNIPER_CONFIG_KEY]))[SNIPER_CONFIG_KEY] || {};
       // On page load only when "Click Pilgrim Service as soon as page loads" is ticked; otherwise the sniper clicks at drop time
+      // ...or when the sniper fired on the release curtain and sent us here to click
+      const pending = readSniperPending();
+      if (pending && config.sevaSniperEnabled) {
+        if (autoClickTargetSevaTile(pending.targetSeva)) {
+          sessionStorage.removeItem(SNIPER_PENDING_KEY);
+          console.log(`[TTD Sniper] Past the release curtain - clicked "${pending.targetSeva}".`);
+        }
+        return;
+      }
       const shouldClick = !!config.sevaSniperEnabled && config.autoClickTargetSeva !== false;
       if (!shouldClick || !config.targetSeva || config.targetSeva === "none") return;
 
@@ -2835,13 +2910,21 @@ async function initSniperScheduler(overrideConfig = null) {
   );
 
   let diffMs = targetServer.getTime() - nowServer.getTime();
-  const leadMs = config.leadTimeMs ?? 250;
+  const leadMs = config.leadTimeMs ?? 0;
   const triggerDiffMs = diffMs - leadMs;
 
   const fireSniperAction = () => {
     if (!cachedSniperConfig?.sevaSniperEnabled || isAutomationHalted()) return;
     console.log("[TTD Sniper] *** FIRING SNIPER ACTION NOW ***");
     showToast("Sniper fired! Executing target action...", "success");
+
+    // TTD swaps the dashboard for a curtain page at the release time - go to the dashboard and click there
+    if (isCurtainPage()) {
+      // Already retrying (this load is one of our refreshes, re-fired by the "within 60s of the drop" rule):
+      // leave it to resumeCurtainSniper's paced retry instead of refreshing again at page-load speed
+      if (!readSniperPending()) leaveCurtainForTargetSeva(config.targetSeva);
+      return;
+    }
 
     // If on home/dashboard page, click the target service
     if (autoClickTargetSevaTile(config.targetSeva)) {
@@ -3021,6 +3104,7 @@ if (window[CONTENT_SCRIPT_INSTANCE_KEY] === CONTENT_SCRIPT_INSTANCE) {
   watchBookingFlowExit();
   watchForBookingError();
   maybeAutoClickTargetSeva();
+  resumeCurtainSniper();
   maybeAutoPickCalendar();
   initSniperScheduler();
 }
