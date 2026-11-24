@@ -940,6 +940,20 @@ function findPayNowButton() {
   ) || null;
 }
 
+// Card form's submit button: "Pay Now", or - in the gateway's narrow/mobile layout (small window) - its
+// "Proceed" button (<button class="j-button ..." aria-label="button Proceed">). Card stage only.
+// On-screen buttons only: earlier pages (e.g. the review page's Pay Now) can stay in the DOM hidden, and
+// clicking one of those does nothing while the visible Proceed is never clicked.
+function findCardPayButton() {
+  const buttons = Array.from(document.querySelectorAll(`${PAY_NOW_BUTTON_SELECTOR}, button, [role="button"]`))
+    .filter((b) => isButtonAvailable(b) && isOnScreen(b));
+  const btn = buttons.find((b) => PAY_NOW_TEXT_PATTERN.test(getButtonText(b))) ||
+    buttons.find((b) => /^proceed$/i.test(getButtonText(b))) ||
+    null;
+  if (btn) console.log(`[TTD Autofill] Card submit button: "${getButtonText(btn)}" (${btn.className || btn.tagName}).`);
+  return btn;
+}
+
 function findGenerateButton() {
   const candidates = Array.from(document.querySelectorAll(
     'button.j-button.j-button-size__medium.secondary, button, [role="button"]'
@@ -1176,7 +1190,7 @@ function resumeFollowUpContinue() {
             console.log("[TTD Autofill] Card details filled in payment form.");
           }
           await sleep(150); // let the gateway's own validation enable Pay Now
-          const payBtn = findPayNowButton();
+          const payBtn = findCardPayButton();
           if (payBtn && clickButtonIfEnabled(payBtn)) {
             showToast("Pay Now clicked for card payment.", "success");
             console.log("[TTD Autofill] Card payment Pay Now clicked.");
@@ -1216,7 +1230,7 @@ function resumeFollowUpContinue() {
           showToast("Card details filled. Clicking Pay Now...", "success");
         }
         await sleep(150);
-        const payBtn = findPayNowButton();
+        const payBtn = findCardPayButton();
         if (payBtn && clickButtonIfEnabled(payBtn)) {
           showToast("Pay Now clicked after card details were filled.", "success");
           console.log("[TTD Autofill] Pay Now clicked after card form completion.");

@@ -30,6 +30,17 @@ function loadPage(html, { url = "https://ttdevasthanams.ap.gov.in/", bridge = tr
   w.HTMLElement.prototype.getBoundingClientRect = () => ({ top: 10, left: 10, width: 100, height: 20, right: 110, bottom: 30, x: 10, y: 10 });
   Object.defineProperty(w.HTMLElement.prototype, "innerText", { get() { return this.textContent; }, configurable: true });
   w.fetch = () => new Promise(() => {}); // TTD's requests never finish here
+  // jsdom has no execCommand; content.js types with insertText / delete on the focused field, like Chrome
+  w.document.execCommand = (cmd, _ui, text) => {
+    const el = w.document.activeElement;
+    if (!el || !("value" in el)) return false;
+    const [start, end] = [el.selectionStart ?? el.value.length, el.selectionEnd ?? el.value.length];
+    if (cmd === "insertText") el.value = el.value.slice(0, start) + text + el.value.slice(end);
+    else if (cmd === "delete") el.value = start === end ? el.value.slice(0, Math.max(0, start - 1)) + el.value.slice(end) : el.value.slice(0, start) + el.value.slice(end);
+    else return false;
+    el.dispatchEvent(new w.Event("input", { bubbles: true }));
+    return true;
+  };
   w.chrome = {
     storage: {
       local: {
