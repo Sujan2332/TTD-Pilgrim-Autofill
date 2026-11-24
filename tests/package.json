@@ -1,0 +1,11 @@
+{
+  "name": "ttd-autofill-extension-tests",
+  "private": true,
+  "description": "Mock tests for the TTD Pilgrim Autofill extension (jsdom, built from reference-pages/). Not part of the extension.",
+  "scripts": {
+    "test": "node run.js"
+  },
+  "devDependencies": {
+    "jsdom": "24.1.3"
+  }
+}

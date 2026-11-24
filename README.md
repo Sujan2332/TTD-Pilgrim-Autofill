@@ -265,8 +265,21 @@ ttd-autofill-extension/
 │   ├── queue/             #   Virtual queue page
 │   ├── calendar/          #   Slot calendar (PAT / Ammavari)
 │   └── arjitha-seva/      #   Arjitha Seva pages + temples/ (one saved page per temple)
+├── tests/                 # Mock tests on the saved pages (not loaded by the extension)
 └── ttd-card-details-sample.json
 ```
+
+### Running the tests
+
+The tests load the real `content.js` / `page-bridge.js` into fake TTD pages built from `reference-pages/` and check the behaviour that has broken before: Continue clicked exactly once (never Back), ticket count and temple selection, the queue re-roll decisions, and that `content.js`'s inline copy of `page-bridge.js` is up to date. Needs [Node.js](https://nodejs.org/) 18+.
+
+```
+cd tests
+npm install      # first time only (installs jsdom into tests/node_modules)
+npm test
+```
+
+Run them after changing `content.js` or `page-bridge.js`, before trying the change on the live site.
 
 ---
 

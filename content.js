@@ -2089,7 +2089,9 @@ async function autoPickCalendarAndSlot(customConfig = null, { manual = false } =
   let pickedSlot = null;
   let attempts = 0;
   const pref = pickAny ? "any" : config.preferredSlot;
-  const targetSevaName = config.arjithaSeva && config.arjithaSeva !== "any" ? config.arjithaSeva.toLowerCase().trim() : null;
+  // Arjitha pages only - other services' slot cards also show "N Available" + ₹, and an old Arjitha seva setting
+  // would make them ask "<seva> is not available"
+  const targetSevaName = isArjithaSevaPage && config.arjithaSeva && config.arjithaSeva !== "any" ? config.arjithaSeva.toLowerCase().trim() : null;
 
   // Card heading, e.g. "Veda Ashirvachanam (08:00 AM )" - TTD renders it in red rgb(226, 78, 90)
   const slotTitle = (s) =>

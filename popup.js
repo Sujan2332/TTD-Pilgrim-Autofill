@@ -860,6 +860,13 @@ function updateArjithaTempleVisibility() {
       const curTemple = document.getElementById("arjithaTempleSelect")?.value || "Srivari Temple - Tirumala";
       const curSeva = document.getElementById("arjithaSevaSelect")?.value || "any";
       populateArjithaSevas(curTemple, curSeva);
+    } else {
+      // Another service chosen: forget the Arjitha temple/seva (saved by the auto-save that runs after this),
+      // so an old seva can't make other services' slot pages ask "<seva> is not available"
+      const defaults = getDefaultSniperConfig();
+      const templeSelect = document.getElementById("arjithaTempleSelect");
+      if (templeSelect) templeSelect.value = defaults.arjithaTemple;
+      populateArjithaSevas(defaults.arjithaTemple, defaults.arjithaSeva);
     }
   }
 }
