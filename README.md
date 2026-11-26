@@ -45,6 +45,7 @@ Maybe you travel as a family and book for different combinations on different da
 | **Virtual queue re-roll** | Automatic, no setting needed. If TTD's virtual queue shows a wait over **2 minutes**, the extension clears the site's local storage and reloads, until the wait is 2 minutes or less (at most 25 tries in a row). Works only on the queue page. |
 | **Keyboard-friendly prompts** | On-page prompts (seva not available, booking paused) work with **↑ / ↓**, **Enter** and **Esc**, even while a TTD alert is open. |
 | **Autofill button count** | The button shows how many pilgrims are selected, e.g. **Autofill Selected 2 Pilgrims**. |
+| **Booking timer** | With Seva &amp; Sniper on and **Show booking timer** ticked, a stopwatch on the TTD page (bottom-left) runs from the service click to the last payment click (Generate / Pay Now / Proceed), then shows the total, e.g. **Booking automated in 14.2 s**. The popup shows the last run's time. |
 
 ---
 

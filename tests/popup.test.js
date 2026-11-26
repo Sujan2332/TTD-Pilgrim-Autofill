@@ -84,4 +84,20 @@ test("sniper lead time 0 is saved as 0 (fires exactly at the drop time)", async 
   assert(storage.ttdSniperConfig.leadTimeMs === 0, `saved lead time: ${storage.ttdSniperConfig.leadTimeMs}`);
 });
 
+test("\"Show booking timer\" checkbox is saved, and the last run is shown under it", async () => {
+  const storage = {
+    ttdSniperConfig: { sevaSniperEnabled: true, showBookingTimer: true },
+    ttdLastBookingRun: { ms: 14200, startLabel: "Special Entry Darshan", endLabel: "Proceed", at: Date.now() },
+  };
+  const w = await loadPopup(storage);
+  const hint = w.document.getElementById("lastBookingRunHint");
+  assert(!hint.hidden && /Last run: 14\.2 s \(Special Entry Darshan → Proceed\)/.test(hint.textContent), `hint: "${hint.textContent}"`);
+  const box = w.document.getElementById("showBookingTimerCheckbox");
+  assert(box.checked, "checkbox should start ticked");
+  box.checked = false;
+  box.dispatchEvent(new w.Event("change", { bubbles: true }));
+  await sleep(200);
+  assert(storage.ttdSniperConfig.showBookingTimer === false, `saved: ${storage.ttdSniperConfig.showBookingTimer}`);
+});
+
 run();

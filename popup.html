@@ -191,6 +191,16 @@
         <div class="field-hint">When ticked, the Quota Sniper below is disabled. Untick to click the service at drop time instead.</div>
       </div>
 
+      <!-- Booking timer: service click -> last payment click -->
+      <div class="form-check-group" style="margin-bottom: 12px; padding: 7px 10px; background: #fff; border-radius: 6px; border: 1px solid #e7e5e4;">
+        <label class="form-check-label" style="font-weight: 600; color: #1f2937;">
+          <input type="checkbox" id="showBookingTimerCheckbox" checked />
+          <span>Show booking timer</span>
+        </label>
+        <div class="field-hint">Shows on the TTD page how long the automation took, from the service click to the last payment click (Generate / Pay Now / Proceed).</div>
+        <div class="field-hint" id="lastBookingRunHint" hidden></div>
+      </div>
+
       <!-- Atomic Clock Sync & Drop Sniper Card -->
       <section id="sniperCard" class="config-card sniper-card">
         <div class="card-header-row">

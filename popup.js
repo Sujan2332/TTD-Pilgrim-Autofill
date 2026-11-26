@@ -814,6 +814,7 @@ function getDefaultSniperConfig() {
     arjithaSeva: "any",
     arjithaFallback: "ask",
     autoClickTargetSeva: true,
+    showBookingTimer: true,
     autoPickerEnabled: true,
     targetDate: "",
     fallbackGreenDate: true,
@@ -887,6 +888,7 @@ function getSniperConfigFromInputs() {
     arjithaSeva: document.getElementById("arjithaSevaSelect")?.value || "any",
     arjithaFallback: document.getElementById("arjithaFallbackSelect")?.value || "ask",
     autoClickTargetSeva: !!document.getElementById("autoClickTargetSevaCheckbox")?.checked,
+    showBookingTimer: !!document.getElementById("showBookingTimerCheckbox")?.checked,
     autoPickerEnabled: !!document.getElementById("autoPickerEnabledCheckbox")?.checked,
     targetDate: document.getElementById("targetDateField")?.value || "",
     fallbackGreenDate: !!document.getElementById("fallbackGreenDateCheckbox")?.checked,
@@ -921,6 +923,21 @@ function updateSevaSniperSettingsState() {
   });
 }
 
+// "Last run: 14.2 s (Special Entry Darshan → Proceed) · 24 Nov, 10:00" under the booking timer checkbox
+// (saved by content.js - it survives the card payment leaving TTD for the bank's page)
+function showLastBookingRun() {
+  const hint = document.getElementById("lastBookingRunHint");
+  if (!hint) return;
+  chrome.storage.local.get(["ttdLastBookingRun"], (res) => {
+    const run = res.ttdLastBookingRun;
+    hint.hidden = !run;
+    if (!run) return;
+    const secs = run.ms < 60000 ? `${(run.ms / 1000).toFixed(1)} s` : `${Math.floor(run.ms / 60000)} min ${((run.ms % 60000) / 1000).toFixed(1)} s`;
+    const when = new Date(run.at).toLocaleString(undefined, { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" });
+    hint.textContent = `Last run: ${secs} (${run.startLabel} → ${run.endLabel}) · ${when}`;
+  });
+}
+
 function applySniperConfigToInputs(config) {
   if (document.getElementById("sevaSniperEnabledToggle")) {
     document.getElementById("sevaSniperEnabledToggle").checked = !!config.sevaSniperEnabled;
@@ -941,6 +958,10 @@ function applySniperConfigToInputs(config) {
   if (document.getElementById("autoClickTargetSevaCheckbox")) {
     document.getElementById("autoClickTargetSevaCheckbox").checked = !!config.autoClickTargetSeva;
   }
+  if (document.getElementById("showBookingTimerCheckbox")) {
+    document.getElementById("showBookingTimerCheckbox").checked = config.showBookingTimer !== false;
+  }
+  showLastBookingRun();
   updateSevaSniperSettingsState();
   if (document.getElementById("autoPickerEnabledCheckbox")) {
     document.getElementById("autoPickerEnabledCheckbox").checked = config.autoPickerEnabled !== false;
@@ -1209,6 +1230,7 @@ async function handleConfigAutoSave() {
     "arjithaSevaSelect",
     "arjithaFallbackSelect",
     "autoClickTargetSevaCheckbox",
+    "showBookingTimerCheckbox",
     "autoPickerEnabledCheckbox",
     "targetDateField",
     "fallbackGreenDateCheckbox",

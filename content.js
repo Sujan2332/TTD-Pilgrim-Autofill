@@ -131,6 +131,88 @@ function showToast(message, kind = "info") {
   }, 4000);
 }
 
+// Booking timer: how long the automation took, from the target service click (or the calendar auto-pick, if
+// the service was clicked by hand) to the last payment click (Generate / Pay Now / Proceed). Kept in
+// sessionStorage so it runs on across TTD's page loads (queue re-rolls included). Shown bottom-left only when
+// Seva & Sniper is ON and "Show booking timer" is ticked; the last result is also saved for the popup.
+const BOOKING_TIMER_KEY = "ttdBookingTimer"; // sessionStorage: { start, startLabel, end?, endLabel?, dismissed? }
+const LAST_BOOKING_RUN_KEY = "ttdLastBookingRun"; // chrome.storage.local: { ms, startLabel, endLabel, at }
+const BOOKING_TIMER_MAX_MS = 30 * 60 * 1000; // a run never finished within 30 min is stale
+let bookingTimerTick = null;
+
+function readBookingTimer() {
+  try {
+    const t = JSON.parse(sessionStorage.getItem(BOOKING_TIMER_KEY) || "null");
+    if (t?.start && (t.end || Date.now() - t.start < BOOKING_TIMER_MAX_MS)) return t;
+  } catch (e) {}
+  sessionStorage.removeItem(BOOKING_TIMER_KEY);
+  return null;
+}
+
+function startBookingTimer(startLabel, { onlyIfIdle = false } = {}) {
+  const running = readBookingTimer();
+  if (onlyIfIdle && running && !running.end) return;
+  sessionStorage.setItem(BOOKING_TIMER_KEY, JSON.stringify({ start: Date.now(), startLabel }));
+  renderBookingTimer();
+}
+
+function stopBookingTimer(endLabel) {
+  const t = readBookingTimer();
+  if (!t || t.end) return;
+  t.end = Date.now();
+  t.endLabel = endLabel;
+  sessionStorage.setItem(BOOKING_TIMER_KEY, JSON.stringify(t));
+  const ms = t.end - t.start;
+  console.log(`[TTD Autofill] Booking automated in ${(ms / 1000).toFixed(1)} s (${t.startLabel} -> ${endLabel}).`);
+  chrome.storage.local.set({ [LAST_BOOKING_RUN_KEY]: { ms, startLabel: t.startLabel, endLabel, at: t.end } }).catch(() => {});
+  renderBookingTimer();
+}
+
+const formatTimerSecs = (ms) => (ms < 60000 ? `${(ms / 1000).toFixed(1)} s` : `${Math.floor(ms / 60000)} min ${((ms % 60000) / 1000).toFixed(1)} s`);
+
+async function renderBookingTimer() {
+  const t = readBookingTimer();
+  const config = (await chrome.storage.local.get([SNIPER_CONFIG_KEY]).catch(() => ({})))[SNIPER_CONFIG_KEY] || {};
+  const show = !!t && !t.dismissed && !!config.sevaSniperEnabled && config.showBookingTimer !== false;
+  let el = document.getElementById("ttd-autofill-timer");
+  clearInterval(bookingTimerTick);
+  if (!show) {
+    el?.remove();
+    return;
+  }
+  if (!el) {
+    el = document.createElement("div");
+    el.id = "ttd-autofill-timer";
+    el.setAttribute("role", "status");
+    el.style.cssText = `
+      position: fixed; left: 20px; bottom: 20px; z-index: 2147483647;
+      display: flex; align-items: center; gap: 10px; padding: 10px 14px;
+      border: 1px solid rgba(255,255,255,0.14); border-left: 3px solid #f59e0b; border-radius: 12px;
+      font-family: -apple-system, "Segoe UI", Arial, sans-serif; font-size: 13px; font-weight: 600;
+      line-height: 1.4; color: #f8fafc; background: rgba(17, 24, 39, 0.96);
+      box-shadow: 0 12px 32px rgba(15, 23, 42, 0.2); font-variant-numeric: tabular-nums;
+    `;
+    el.innerHTML = '<div data-text></div><button type="button" aria-label="Close timer" style="all: unset; cursor: pointer; padding: 0 2px; font-size: 16px; line-height: 1; color: #94a3b8;">×</button>';
+    el.querySelector("button").addEventListener("click", () => {
+      const cur = readBookingTimer();
+      if (cur) sessionStorage.setItem(BOOKING_TIMER_KEY, JSON.stringify({ ...cur, dismissed: true }));
+      clearInterval(bookingTimerTick);
+      el.remove();
+    });
+    document.documentElement.appendChild(el);
+  }
+  const text = el.querySelector("[data-text]");
+  if (t.end) {
+    el.style.borderLeftColor = "#34d399";
+    text.textContent = `✅ Booking automated in ${formatTimerSecs(t.end - t.start)} (${t.startLabel} → ${t.endLabel})`;
+    return;
+  }
+  el.style.borderLeftColor = "#f59e0b";
+  const update = () => { text.textContent = `⏱ Booking timer ${formatTimerSecs(Date.now() - t.start)}`; };
+  update();
+  bookingTimerTick = setInterval(update, 100);
+}
+
 // In-page prompt with one button per choice plus Cancel. Resolves with the chosen
 // choice's `value`, or null when cancelled. Styled to match the toast.
 function showChoiceDialog(title, message, choices, cancelLabel = "Cancel") {
@@ -970,6 +1052,7 @@ function clickGenerateIfEnabled() {
   if (btn) {
     generateButtonClicked = true;
     clickOnce(btn); // was fireReactClick: ~5 clicks -> 5 QR requests -> "Something went wrong"
+    stopBookingTimer("Generate");
     return true;
   }
   return false;
@@ -1192,6 +1275,7 @@ function resumeFollowUpContinue() {
           await sleep(150); // let the gateway's own validation enable Pay Now
           const payBtn = findCardPayButton();
           if (payBtn && clickButtonIfEnabled(payBtn)) {
+            stopBookingTimer(getButtonText(payBtn));
             showToast("Pay Now clicked for card payment.", "success");
             console.log("[TTD Autofill] Card payment Pay Now clicked.");
             stop();
@@ -1232,6 +1316,7 @@ function resumeFollowUpContinue() {
         await sleep(150);
         const payBtn = findCardPayButton();
         if (payBtn && clickButtonIfEnabled(payBtn)) {
+          stopBookingTimer(getButtonText(payBtn));
           showToast("Pay Now clicked after card details were filled.", "success");
           console.log("[TTD Autofill] Pay Now clicked after card form completion.");
           stop();
@@ -1878,6 +1963,7 @@ async function autoPickCalendarAndSlot(customConfig = null, { manual = false } =
   }
 
   showToast("Calendar detected! Auto-picker initiating...", "info");
+  startBookingTimer("calendar", { onlyIfIdle: true }); // service clicked by hand - time from here
 
   // Step 0: Handle Temple Selection if on Arjitha Seva
   const templeInput = document.querySelector('input[name="templeSelected"]') ||
@@ -2471,6 +2557,8 @@ function autoClickTargetSevaTile(targetSeva) {
     tileEl.scrollIntoView({ behavior: "instant", block: "center" });
   } catch (e) {}
 
+  startBookingTimer(targetSeva);
+
   // Dispatch React click to tile container and label
   fireReactClick(tileEl);
   if (tileEl !== targetEl) {
@@ -2659,6 +2747,7 @@ chrome.storage.local.get([SNIPER_CONFIG_KEY]).then((res) => {
 chrome.storage.onChanged.addListener((changes, area) => {
   if (area === "local" && changes[SNIPER_CONFIG_KEY]) {
     cachedSniperConfig = changes[SNIPER_CONFIG_KEY].newValue || {};
+    renderBookingTimer(); // master switch / "Show booking timer" toggled
   }
 });
 
@@ -3105,6 +3194,7 @@ if (window[CONTENT_SCRIPT_INSTANCE_KEY] === CONTENT_SCRIPT_INSTANCE) {
   watchForBookingError();
   maybeAutoClickTargetSeva();
   resumeCurtainSniper();
+  renderBookingTimer(); // a run in progress keeps counting on every page
   maybeAutoPickCalendar();
   initSniperScheduler();
 }
