@@ -100,4 +100,12 @@ test("\"Show booking timer\" checkbox is saved, and the last run is shown under 
   assert(storage.ttdSniperConfig.showBookingTimer === false, `saved: ${storage.ttdSniperConfig.showBookingTimer}`);
 });
 
+test("\"Show booking timer\" is ticked by default and stays usable when the sniper card is disabled", async () => {
+  const storage = { ttdSniperConfig: { sevaSniperEnabled: true, autoClickTargetSeva: true } }; // never saved -> default
+  const w = await loadPopup(storage);
+  const box = w.document.getElementById("showBookingTimerCheckbox");
+  assert(box.checked, "not ticked by default");
+  assert(!box.disabled && !box.closest("#sniperCard"), "disabled along with the sniper card (on-load click mode)");
+});
+
 run();

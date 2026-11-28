@@ -2454,18 +2454,25 @@ function matchesSevaLabel(labelText, targetSeva) {
     return hasAmmavariOrPat && hasDarshanOrSed;
   }
 
-  // 3. Regular Special Entry Darshan (MUST NOT be Ammavari)
+  // 3. Vaikunta Dwara Darshanam - "Electronic Dip" and "Special Entry Darshan" are two tiles: never mix them up
+  if (t.includes("vaikunta")) {
+    if (!l.includes("vaikunta")) return false;
+    if (/\bdip\b/.test(t)) return /\bdip\b/.test(l);
+    return l.includes("special entry") && !/\bdip\b/.test(l);
+  }
+
+  // 4. Regular Special Entry Darshan (MUST NOT be Ammavari, or Vaikunta Dwara's own SED tile)
   if (t.includes("special entry darshan") || t === "sed") {
-    if (l.includes("ammavari") || /\bpat\b/i.test(labelText)) return false;
+    if (l.includes("ammavari") || /\bpat\b/i.test(labelText) || l.includes("vaikunta")) return false;
     return l.includes("special entry darshan");
   }
 
-  // 4. Arjitha Seva (matches "Arjitha Seva", "Arjitha Sevas", "Arjitha")
+  // 5. Arjitha Seva (matches "Arjitha Seva", "Arjitha Sevas", "Arjitha")
   if (t.includes("arjitha")) {
     return l.includes("arjitha");
   }
 
-  // 5. Other services (e.g. Accommodation, Homam)
+  // 6. Other services (e.g. Accommodation, Homam)
   const normL = l.replace(/[^a-z0-9]/g, "");
   const normT = t.replace(/[^a-z0-9]/g, "");
   return normL.includes(normT) || normT.includes(normL);
